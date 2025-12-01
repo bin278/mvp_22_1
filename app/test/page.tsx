@@ -13,11 +13,13 @@ export default function TestPage() {
   const [connectionTest, setConnectionTest] = useState<TestResult>({ status: 'loading', message: '测试中...' })
   const [authTest, setAuthTest] = useState<TestResult>({ status: 'loading', message: '测试中...' })
   const [dbTest, setDbTest] = useState<TestResult>({ status: 'loading', message: '测试中...' })
+  const [envTest, setEnvTest] = useState<TestResult>({ status: 'loading', message: '测试中...' })
 
   useEffect(() => {
     testConnection()
     testAuth()
     testDatabase()
+    testEnvironment()
   }, [])
 
   const testConnection = async () => {
@@ -103,6 +105,33 @@ export default function TestPage() {
     }
   }
 
+  const testEnvironment = async () => {
+    try {
+      const response = await fetch('/api/test')
+      const data = await response.json()
+
+      if (response.ok) {
+        setEnvTest({
+          status: 'success',
+          message: '环境变量配置检查完成',
+          data: data.environment
+        })
+      } else {
+        setEnvTest({
+          status: 'error',
+          message: '环境变量检查失败',
+          data: data
+        })
+      }
+    } catch (error: any) {
+      setEnvTest({
+        status: 'error',
+        message: `环境变量检查错误: ${error.message}`,
+        data: error
+      })
+    }
+  }
+
   const TestResult = ({ title, result }: { title: string, result: TestResult }) => (
     <div className="p-4 border rounded-lg">
       <h3 className="font-semibold mb-2">{title}</h3>
@@ -127,12 +156,13 @@ export default function TestPage() {
   return (
     <div className="min-h-screen p-8">
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold mb-8">Supabase 数据库测试</h1>
+        <h1 className="text-3xl font-bold mb-8">系统配置测试</h1>
 
         <div className="space-y-6">
-          <TestResult title="🔗 数据库连接测试" result={connectionTest} />
-          <TestResult title="🔐 认证系统测试" result={authTest} />
-          <TestResult title="📊 数据库查询测试" result={dbTest} />
+          <TestResult title="🔧 环境变量配置测试" result={envTest} />
+          <TestResult title="🔗 Supabase 数据库连接测试" result={connectionTest} />
+          <TestResult title="🔐 Supabase 认证系统测试" result={authTest} />
+          <TestResult title="📊 Supabase 数据库查询测试" result={dbTest} />
         </div>
 
         <div className="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-lg">

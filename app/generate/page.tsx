@@ -455,11 +455,11 @@ export default function GeneratePage() {
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-border bg-card overflow-hidden">
+                  <div className="rounded-xl border border-border bg-card overflow-hidden h-[66vh]">
                     {viewMode === "code" ? (
-                      <div className="grid grid-cols-[200px_1fr]">
+                      <div className="grid grid-cols-[200px_1fr] h-full">
                         {/* File Browser */}
-                        <div className="border-r border-border bg-secondary/20 p-2 max-h-[500px] overflow-y-auto">
+                        <div className="border-r border-border bg-secondary/20 p-2 overflow-y-auto">
                           <div className="space-y-1">
                             {Object.keys(generatedProject.files).map((filePath) => (
                               <button
@@ -477,7 +477,7 @@ export default function GeneratePage() {
                           </div>
                         </div>
                         {/* Code Display */}
-                        <div className="max-h-[500px] overflow-auto">
+                        <div className="overflow-auto">
                           <pre className="p-6 text-sm">
                             <code className="text-foreground">
                               {generatedProject.files[selectedFile]}
