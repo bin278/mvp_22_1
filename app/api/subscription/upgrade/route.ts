@@ -3,11 +3,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/auth";
 import { z } from "zod";
-import { checkPlanTransition, getAmountByCurrency } from "@/lib/payment/payment-config";
+import { checkPlanTransitionCN, getAmountByCurrencyCN } from "@/lib/payment/payment-config-cn";
 import { getUserPlan } from "@/lib/subscription/usage-tracker";
 import { isChinaDeployment } from "@/lib/config/deployment.config";
-import { getUserAdapter } from "@/lib/database";
-import type { PlanType, BillingCycle } from "@/lib/payment/payment-config";
+import type { PlanType, BillingCycle } from "@/lib/payment/payment-config-cn";
 
 // 升级请求验证schema - 支持 CN 和 INTL 支付方式
 const upgradeSchema = z.object({
@@ -107,7 +106,7 @@ export async function POST(request: NextRequest) {
     const currentPlan = await getUserPlan(userId);
 
     // 检查计划转换是否允许
-    const transition = checkPlanTransition(currentPlan, targetPlan as PlanType);
+    const transition = checkPlanTransitionCN(currentPlan, targetPlan as PlanType);
 
     // 确定货币类型
     const currency = isCN ? "CNY" : "USD";
@@ -119,7 +118,7 @@ export async function POST(request: NextRequest) {
         action: "renew",
         currentPlan,
         targetPlan,
-        amount: getAmountByCurrency(currency, billingCycle, targetPlan as PlanType),
+        amount: getAmountByCurrencyCN(currency, billingCycle, targetPlan as PlanType),
         currency,
         billingCycle,
         paymentMethod,
@@ -162,7 +161,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 计算升级价格
-    const upgradeAmount = getAmountByCurrency(currency, billingCycle, targetPlan as PlanType);
+    const upgradeAmount = getAmountByCurrencyCN(currency, billingCycle, targetPlan as PlanType);
 
     return NextResponse.json({
       success: true,
@@ -215,35 +214,35 @@ export async function GET(request: NextRequest) {
     if (currentPlan === "free") {
       upgradeOptions.push({
         plan: "pro",
-        monthly: getAmountByCurrency(currency, "monthly", "pro"),
-        yearly: getAmountByCurrency(currency, "yearly", "pro"),
+        monthly: getAmountByCurrencyCN(currency, "monthly", "pro"),
+        yearly: getAmountByCurrencyCN(currency, "yearly", "pro"),
         available: true,
       });
       upgradeOptions.push({
         plan: "enterprise",
-        monthly: getAmountByCurrency(currency, "monthly", "enterprise"),
-        yearly: getAmountByCurrency(currency, "yearly", "enterprise"),
+        monthly: getAmountByCurrencyCN(currency, "monthly", "enterprise"),
+        yearly: getAmountByCurrencyCN(currency, "yearly", "enterprise"),
         available: true,
       });
     } else if (currentPlan === "pro") {
       upgradeOptions.push({
         plan: "pro",
-        monthly: getAmountByCurrency(currency, "monthly", "pro"),
-        yearly: getAmountByCurrency(currency, "yearly", "pro"),
+        monthly: getAmountByCurrencyCN(currency, "monthly", "pro"),
+        yearly: getAmountByCurrencyCN(currency, "yearly", "pro"),
         available: true, // 续订
       });
       upgradeOptions.push({
         plan: "enterprise",
-        monthly: getAmountByCurrency(currency, "monthly", "enterprise"),
-        yearly: getAmountByCurrency(currency, "yearly", "enterprise"),
+        monthly: getAmountByCurrencyCN(currency, "monthly", "enterprise"),
+        yearly: getAmountByCurrencyCN(currency, "yearly", "enterprise"),
         available: true,
       });
     } else {
       // Enterprise 只能续订
       upgradeOptions.push({
         plan: "enterprise",
-        monthly: getAmountByCurrency(currency, "monthly", "enterprise"),
-        yearly: getAmountByCurrency(currency, "yearly", "enterprise"),
+        monthly: getAmountByCurrencyCN(currency, "monthly", "enterprise"),
+        yearly: getAmountByCurrencyCN(currency, "yearly", "enterprise"),
         available: true, // 续订
       });
     }

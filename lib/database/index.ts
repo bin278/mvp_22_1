@@ -35,6 +35,24 @@ export function getDatabaseClient() {
 // 导出统一的数据库客户端
 export const supabaseAdmin = getDatabaseClient();
 
+// 获取用户数据库适配器
+export async function getUserAdapter() {
+  const provider = getDatabaseProvider();
+
+  switch (provider) {
+    case 'cloudbase':
+      const { CloudBaseUserAdapter } = await import('./adapters/cloudbase-user');
+      return new CloudBaseUserAdapter();
+    case 'tencent-cloud':
+      // TODO: 实现腾讯云用户适配器
+      throw new Error('Tencent Cloud user adapter not implemented yet');
+    case 'supabase':
+    default:
+      // TODO: 实现Supabase用户适配器
+      throw new Error('Supabase user adapter not implemented yet');
+  }
+}
+
 // 导出测试连接函数
 export async function testDatabaseConnection(): Promise<boolean> {
   const provider = getDatabaseProvider();
