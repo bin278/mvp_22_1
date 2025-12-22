@@ -111,3 +111,4 @@ export interface UserDatabaseAdapter {
   updatePayment(paymentId: string, updates: Partial<Payment>): Promise<MutationResult>;
 }
 
+
