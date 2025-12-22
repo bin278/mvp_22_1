@@ -8,7 +8,7 @@
     "plugins": {
       "nextjs": {
         "useNodeVersion": "20",
-        "installCommand": "pnpm install --frozen-lockfile",
+        "installCommand": "pnpm install --frozen-lockfile --force || rm -f pnpm-lock.yaml && pnpm install || npm install",
         "buildCommand": "CLOUDBASE_BUILD=true pnpm build",
         "outputDir": ".next/standalone"
       }

@@ -21,7 +21,10 @@ COPY package.json pnpm-lock.yaml* ./
 # ===========================================
 FROM base AS deps
 # 安装所有依赖（包括 devDependencies 用于构建）
-RUN pnpm install --frozen-lockfile --prod=false
+# 处理 pnpm lockfile 兼容性问题
+RUN pnpm install --frozen-lockfile --prod=false --force || \
+    (rm -f pnpm-lock.yaml && pnpm install --prod=false) || \
+    npm install
 
 # ===========================================
 # 构建阶段 - 腾讯云优化

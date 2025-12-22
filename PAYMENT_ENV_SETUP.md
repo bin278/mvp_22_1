@@ -61,3 +61,4 @@ PAYMENT_TEST_MODE=true
 2. 在应用详情页获取AppID和密钥信息
 3. 生成RSA密钥对并设置
 
+

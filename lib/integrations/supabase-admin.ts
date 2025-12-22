@@ -20,3 +20,4 @@ export const supabaseAdmin = createClient(
 // 注意：这个模块仅用于兼容性，中国版项目应使用 CloudBase
 // 如果需要完整的 Supabase 管理功能，请配置 SUPABASE_SERVICE_ROLE_KEY
 
+

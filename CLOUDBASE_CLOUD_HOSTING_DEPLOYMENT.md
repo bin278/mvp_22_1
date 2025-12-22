@@ -147,6 +147,17 @@ npm run cloudbase:check-deploy
 ## 🐛 常见问题
 
 ### 构建失败
+
+#### pnpm lockfile 兼容性问题
+```
+ERR_PNPM_LOCKFILE_BREAKING_CHANGE Lockfile not compatible with current pnpm
+```
+**解决方案**: 已自动处理，支持多种后备方案：
+1. 使用 `--force` 参数
+2. 删除 lockfile 重新生成
+3. 回退到 npm
+
+#### 其他构建问题
 - 检查 `package.json` 中的依赖是否完整
 - 确认 Node.js 版本为 20
 - 检查环境变量格式是否正确
@@ -196,3 +207,4 @@ npm run cloudbase:check-deploy
 ---
 
 **配置完成！你的项目现在已经准备好部署到 CloudBase 云托管了！** 🚀
+
