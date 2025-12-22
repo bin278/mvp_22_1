@@ -52,11 +52,20 @@ export async function POST(request: NextRequest) {
   console.log('🚀 Starting streaming code generation request')
 
   try {
-    const { prompt, model: requestedModel = 'deepseek-chat' } = await request.json()
+    const body = await request.json()
+    const { prompt, model: requestedModel = 'deepseek-chat' } = body
+
+    console.log('📝 Request details:', {
+      promptLength: prompt?.length,
+      requestedModel,
+      hasPrompt: !!prompt,
+      promptType: typeof prompt
+    })
 
     if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+      console.log('❌ Invalid prompt:', { prompt })
       return NextResponse.json(
-        { error: 'Prompt is required' },
+        { error: 'Prompt is required and must be a non-empty string' },
         { status: 400 }
       )
     }

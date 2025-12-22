@@ -613,10 +613,31 @@ function GeneratePageContent() {
     }
 
     try {
+      // 先使用调试API检查请求
+      console.log('🔍 Sending debug request first...')
+      const debugResponse = await fetch('/api/debug-generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          model: selectedModel
+        }),
+      })
+
+      const debugResult = await debugResponse.json()
+      console.log('🔍 Debug response:', debugResult)
+
+      if (!debugResult.success) {
+        throw new Error(`Validation failed: ${debugResult.error}`)
+      }
+
       const response = await fetch('/api/generate-stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authSession.accessToken}`,
         },
         body: JSON.stringify({
           prompt: prompt.trim(),
