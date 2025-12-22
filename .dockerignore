@@ -68,7 +68,7 @@ dist
 
 # Gatsby files
 .cache/
-public
+# public  # Next.js 需要 public 目录
 
 # Storybook build outputs
 .out
