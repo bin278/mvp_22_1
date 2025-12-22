@@ -17,19 +17,7 @@ import type { GeneratedProject } from "@/lib/code-generator"
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
 import { ConversationSidebar } from "@/components/conversation-sidebar"
 import { ModelSelector } from "@/components/model-selector"
-// 暂时注释掉订阅相关的导入，因为我们还没有实现这些功能
-// import { SUBSCRIPTION_TIERS, getDefaultModel, AVAILABLE_MODELS, type SubscriptionTier } from "@/lib/subscription-tiers"
-
-// 临时定义一些常量以避免编译错误
-const SUBSCRIPTION_TIERS = {
-  free: { name: 'Free', limits: {} },
-  pro: { name: 'Pro', limits: {} },
-  enterprise: { name: 'Enterprise', limits: {} }
-};
-
-const getDefaultModel = () => 'deepseek-chat';
-const AVAILABLE_MODELS = ['deepseek-chat', 'deepseek-coder'];
-type SubscriptionTier = 'free' | 'pro' | 'enterprise';
+import { SUBSCRIPTION_TIERS, getDefaultModel, AVAILABLE_MODELS, type SubscriptionTier } from "@/lib/subscription-tiers"
 
 interface Message {
   id: string

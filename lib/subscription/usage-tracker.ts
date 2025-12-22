@@ -8,7 +8,7 @@
 import { createClient } from "@supabase/supabase-js";
 import cloudbase from "@cloudbase/node-sdk";
 import { isChinaDeployment } from "@/lib/config/deployment.config";
-import { PlanType } from "../payment/payment-config";
+import { PlanType } from "../payment/payment-config-cn";
 import { PLAN_FEATURES } from "./features";
 
 // ==========================================

@@ -113,6 +113,11 @@ export async function POST(request: NextRequest) {
         baseUrl = process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com'
         model = requestedModel
         break
+      case 'zhipu':
+        apiKey = process.env.GLM_API_KEY
+        baseUrl = process.env.GLM_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4/'
+        model = process.env.GLM_MODEL || 'glm-4-6'
+        break
       default:
         return NextResponse.json(
           { error: `Unsupported model provider: ${modelConfig.provider}` },

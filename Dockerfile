@@ -3,12 +3,12 @@
 # 支持 CloudBase + 微信支付 + 支付宝
 # ===========================================
 
-# 使用官方 Node.js 运行时作为基础镜像
+# 使用官方 Node.js 运行时作为基础镜像 (云托管优化)
 FROM node:20-alpine AS base
 
 # 安装 pnpm 和必要的系统依赖
-RUN npm install -g pnpm && \
-    apk add --no-cache libc6-compat curl
+RUN npm install -g pnpm@8 && \
+    apk add --no-cache libc6-compat curl wget
 
 # 设置工作目录
 WORKDIR /app
@@ -30,21 +30,24 @@ FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# 设置腾讯云部署相关的环境变量
+# 设置腾讯云云托管部署相关的环境变量
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 ENV DEPLOYMENT_REGION=cn
+ENV CLOUDBASE_BUILD=true
 
 # CloudBase 和支付相关的环境变量（在部署时通过 ARG 或 ENV 设置）
 ARG NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID
 ARG NEXT_PUBLIC_WECHAT_CLOUDBASE_ID
 ARG CLOUDBASE_SECRET_ID
 ARG CLOUDBASE_SECRET_KEY
+ARG NEXT_PUBLIC_APP_URL
 
 ENV NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID=$NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID
 ENV NEXT_PUBLIC_WECHAT_CLOUDBASE_ID=$NEXT_PUBLIC_WECHAT_CLOUDBASE_ID
 ENV CLOUDBASE_SECRET_ID=$CLOUDBASE_SECRET_ID
 ENV CLOUDBASE_SECRET_KEY=$CLOUDBASE_SECRET_KEY
+ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
 
 # 构建应用
 RUN pnpm build

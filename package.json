@@ -22,7 +22,7 @@
     "tencent:deploy": "echo '使用腾讯云控制台或 CLI 部署容器'",
 
     "cloudbase:check": "node check-cloudbase-config.js",
-    "cloudbase:check-deploy": "node check-cloudbase-deployment.js",
+    "cloudbase:check-deploy": "node scripts/check-cloudbase-deployment.js",
     "env:check": "node check-env-content.js",
     "env:validate": "node check-env.js",
     "payment:check": "node check-payment-env.js",

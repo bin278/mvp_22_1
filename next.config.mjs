@@ -11,11 +11,6 @@ const nextConfig = {
   },
   // CloudBase 部署配置
   output: process.env.CLOUDBASE_BUILD ? 'standalone' : undefined,
-  // 腾讯云部署优化
-  experimental: {
-    // 启用输出文件跟踪，用于更好的缓存
-    outputFileTracingRoot: undefined,
-  },
   // CloudBase 环境变量配置
   env: {
     // Supabase 兼容配置

@@ -14,7 +14,7 @@ import {
   getAvailableDimensions,
   RECOMMENDATION_REASON_CONFIG,
 } from "@/lib/subscription/features";
-import { PRICING_TABLE, getYearlyDiscount } from "@/lib/payment/payment-config";
+import { PRICING_TABLE_CN, getYearlyDiscountCN } from "@/lib/payment/payment-config-cn";
 
 /**
  * GET /api/subscription/status
@@ -74,11 +74,11 @@ export async function GET(request: NextRequest) {
         export: exportPermission,
       },
       pricing: {
-        pro: PRICING_TABLE.USD.pro,
-        enterprise: PRICING_TABLE.USD.enterprise,
+        pro: PRICING_TABLE_CN.CNY.pro,
+        enterprise: PRICING_TABLE_CN.CNY.enterprise,
         discounts: {
-          pro: getYearlyDiscount("pro"),
-          enterprise: getYearlyDiscount("enterprise"),
+          pro: getYearlyDiscountCN("pro"),
+          enterprise: getYearlyDiscountCN("enterprise"),
         },
       },
     };
