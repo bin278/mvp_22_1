@@ -1,5 +1,5 @@
 // app/api/subscription/upgrade/route.ts - 会员升级API
-// 支持双环境架构：INTL (Supabase) �?CN (CloudBase)
+// 支持双环境架构：INTL (Supabase) 和 CN (CloudBase)
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/auth";
 import { z } from "zod";
@@ -9,7 +9,7 @@ import { isChinaDeployment } from "@/lib/config/deployment.config";
 import { getUserAdapter } from "@/lib/database";
 import type { PlanType, BillingCycle } from "@/lib/payment/payment-config-cn";
 
-// 升级请求验证schema - 支持 CN �?INTL 支付方式
+// 升级请求验证schema - 支持 CN 和 INTL 支付方式
 const upgradeSchema = z.object({
   targetPlan: z.enum(["pro", "enterprise"]),
   billingCycle: z.enum(["monthly", "yearly"]),
@@ -18,17 +18,17 @@ const upgradeSchema = z.object({
 
 /**
  * 获取用户当前活跃订阅信息
- * 支持双环境架�? */
+ * 支持双环境架构 */
 async function getActiveSubscription(userId: string) {
   const now = new Date().toISOString();
 
   if (isChinaDeployment()) {
-    // CN 环境：使�?CloudBase
+    // CN 环境：使用 CloudBase
     const adapter = await getUserAdapter();
     const result = await adapter.getActiveSubscription(userId);
     return result.data;
   } else {
-    // INTL 环境：使�?Supabase
+    // INTL 环境：使用 Supabase
     const { supabaseAdmin } = await import("@/lib/integrations/supabase-admin");
     const { data } = await supabaseAdmin
       .from("user_subscriptions")
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
 
     const { targetPlan, billingCycle, paymentMethod } = validationResult.data;
 
-    // 验证支付方式与部署环境匹�?    const isCN = isChinaDeployment();
+    // 验证支付方式与部署环境匹配    const isCN = isChinaDeployment();
     const cnPaymentMethods = ["wechat", "alipay"];
     const intlPaymentMethods = ["stripe", "paypal"];
 
@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
     // 获取当前计划
     const currentPlan = await getUserPlan(userId);
 
-    // 检查计划转换是否允�?    const transition = checkPlanTransitionCN(currentPlan, targetPlan as PlanType);
+    // 检查计划转换是否允许    const transition = checkPlanTransitionCN(currentPlan, targetPlan as PlanType);
 
     // 确定货币类型
     const currency = isCN ? "CNY" : "USD";
@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
         currency,
         billingCycle,
         paymentMethod,
-        message: isCN ? "您可以续订当前计划�? : "You can renew your current plan.",
+        message: isCN ? "您可以续订当前计划。" : "You can renew your current plan.",
       });
     }
 
@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
         {
           success: false,
           error: isCN
-            ? "不支持降级。您只能从免费版升级到专业版，或从专业版升级到企业版�?
+            ? "不支持降级。您只能从免费版升级到专业版，或从专业版升级到企业版。"
             : "Downgrade is not allowed. You can only upgrade from Free to Pro, or from Pro to Enterprise.",
           currentPlan,
           targetPlan,
@@ -138,10 +138,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 获取当前订阅信息以计算剩余时�?    const currentSubscription = await getActiveSubscription(userId);
+    // 获取当前订阅信息以计算剩余时间    const currentSubscription = await getActiveSubscription(userId);
 
     let prorateCreditDays = 0;
-    let message = isCN ? "升级到更高级计划�? : "Upgrade to a higher plan.";
+    let message = isCN ? "升级到更高级计划。" : "Upgrade to a higher plan.";
 
     if (currentSubscription) {
       // 计算剩余天数
