@@ -110,3 +110,4 @@ export interface UserDatabaseAdapter {
   getUserPayments(userId: string, options?: QueryOptions): Promise<QueryResult<Payment>>;
   updatePayment(paymentId: string, updates: Partial<Payment>): Promise<MutationResult>;
 }
+
