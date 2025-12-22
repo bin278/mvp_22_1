@@ -20,24 +20,27 @@ async function callDeepSeekAPI(prompt: string) {
     messages: [
       {
         role: 'system',
-          content: `You are a professional frontend developer. Generate a COMPLETE React component based on user requirements.
+          content: `Generate a complete React component for live preview.
 
-CRITICAL: Return ONLY the complete React component code - NO imports, NO exports, just the function body. The code will be executed in an environment with React, Tailwind CSS, and common icon components already available.
+IMPORTANT: The component will run in a browser environment with these globals available:
+- React, ReactDOM (full React)
+- Tailwind CSS (all classes available)
+- Lucide React icons: Play, Pause, RotateCcw, Trophy, Target, Zap, Sparkles, Mail, Lock, User, AlertCircle, Check, Calendar, Clock, ArrowRight, Star, Rocket, Shield, Search, Cloud, Sun, CloudRain, Wind, Thermometer, Droplets, MapPin, RefreshCw
 
-Requirements:
-1. Use 'function App()' or 'const App = () =>' syntax
-2. Include ALL component logic and JSX
-3. Use Tailwind CSS classes for styling
-4. Use provided icon components: Play, Pause, RotateCcw, Trophy, Target, Zap, Sparkles, Mail, Lock, User, AlertCircle, Check, Calendar, Clock, ArrowRight, Star, Rocket, Shield
-5. Make it visually appealing and responsive
-6. NO truncation - complete code only
+Return ONLY the complete component function - NO imports/exports. Use:
+- function App() { ... } or const App = () => { ... }
+- React.useState, React.useEffect, etc. for hooks
+- Icon components directly (e.g., <Play className="w-4 h-4" />)
+- Tailwind classes for styling
+- Complete, working JSX
 
-Example format:
+Example:
 function App() {
-  const [state, setState] = React.useState(initialValue);
+  const [count, setCount] = React.useState(0);
   return (
-    <div className="container mx-auto p-4">
-      {/* Complete JSX here */}
+    <div className="p-4">
+      <Play className="w-8 h-8" />
+      <p>Count: {count}</p>
     </div>
   );
 }`
@@ -282,31 +285,72 @@ export async function POST(request: NextRequest) {
         }, icons[name] || "?");
       };
 
+      // Initialize Lucide icons in global scope
+      if (window.lucideReact) {
+        window.Play = window.lucideReact.Play;
+        window.Pause = window.lucideReact.Pause;
+        window.RotateCcw = window.lucideReact.RotateCcw;
+        window.Trophy = window.lucideReact.Trophy;
+        window.Target = window.lucideReact.Target;
+        window.Zap = window.lucideReact.Zap;
+        window.Sparkles = window.lucideReact.Sparkles;
+        window.Mail = window.lucideReact.Mail;
+        window.Lock = window.lucideReact.Lock;
+        window.User = window.lucideReact.User;
+        window.AlertCircle = window.lucideReact.AlertCircle;
+        window.Check = window.lucideReact.Check;
+        window.Calendar = window.lucideReact.Calendar;
+        window.Clock = window.lucideReact.Clock;
+        window.ArrowRight = window.lucideReact.ArrowRight;
+        window.Star = window.lucideReact.Star;
+        window.Rocket = window.lucideReact.Rocket;
+        window.Shield = window.lucideReact.Shield;
+        // Add commonly used weather icons
+        window.Search = window.lucideReact.Search;
+        window.Cloud = window.lucideReact.Cloud;
+        window.Sun = window.lucideReact.Sun;
+        window.CloudRain = window.lucideReact.CloudRain;
+        window.Wind = window.lucideReact.Wind;
+        window.Thermometer = window.lucideReact.Thermometer;
+        window.Droplets = window.lucideReact.Droplets;
+        window.MapPin = window.lucideReact.MapPin;
+        window.RefreshCw = window.lucideReact.RefreshCw;
+      }
+
       // Create icon components with Lucide support
-      const Play = (props) => React.createElement(IconComponent, { name: 'Play', ...props });
-      const Pause = (props) => React.createElement(IconComponent, { name: 'Pause', ...props });
-      const RotateCcw = (props) => React.createElement(IconComponent, { name: 'RotateCcw', ...props });
-      const Trophy = (props) => React.createElement(IconComponent, { name: 'Trophy', ...props });
-      const Target = (props) => React.createElement(IconComponent, { name: 'Target', ...props });
-      const Zap = (props) => React.createElement(IconComponent, { name: 'Zap', ...props });
-      const Sparkles = (props) => React.createElement(IconComponent, { name: 'Sparkles', ...props });
-      const Mail = (props) => React.createElement(IconComponent, { name: 'Mail', ...props });
-      const Lock = (props) => React.createElement(IconComponent, { name: 'Lock', ...props });
-      const User = (props) => React.createElement(IconComponent, { name: 'User', ...props });
-      const AlertCircle = (props) => React.createElement(IconComponent, { name: 'AlertCircle', ...props });
-      const Check = (props) => React.createElement(IconComponent, { name: 'Check', ...props });
-      const Calendar = (props) => React.createElement(IconComponent, { name: 'Calendar', ...props });
-      const Clock = (props) => React.createElement(IconComponent, { name: 'Clock', ...props });
-      const ArrowRight = (props) => React.createElement(IconComponent, { name: 'ArrowRight', ...props });
-      const Star = (props) => React.createElement(IconComponent, { name: 'Star', ...props });
-      const Rocket = (props) => React.createElement(IconComponent, { name: 'Rocket', ...props });
-      const Shield = (props) => React.createElement(IconComponent, { name: 'Shield', ...props });
+      const Play = (props) => window.Play ? React.createElement(window.Play, props) : React.createElement(IconComponent, { name: 'play', ...props });
+      const Pause = (props) => window.Pause ? React.createElement(window.Pause, props) : React.createElement(IconComponent, { name: 'pause', ...props });
+      const RotateCcw = (props) => window.RotateCcw ? React.createElement(window.RotateCcw, props) : React.createElement(IconComponent, { name: 'rotate', ...props });
+      const Trophy = (props) => window.Trophy ? React.createElement(window.Trophy, props) : React.createElement(IconComponent, { name: 'trophy', ...props });
+      const Target = (props) => window.Target ? React.createElement(window.Target, props) : React.createElement(IconComponent, { name: 'target', ...props });
+      const Zap = (props) => window.Zap ? React.createElement(window.Zap, props) : React.createElement(IconComponent, { name: 'zap', ...props });
+      const Sparkles = (props) => window.Sparkles ? React.createElement(window.Sparkles, props) : React.createElement(IconComponent, { name: 'sparkles', ...props });
+      const Mail = (props) => window.Mail ? React.createElement(window.Mail, props) : React.createElement(IconComponent, { name: 'mail', ...props });
+      const Lock = (props) => window.Lock ? React.createElement(window.Lock, props) : React.createElement(IconComponent, { name: 'lock', ...props });
+      const User = (props) => window.User ? React.createElement(window.User, props) : React.createElement(IconComponent, { name: 'user', ...props });
+      const AlertCircle = (props) => window.AlertCircle ? React.createElement(window.AlertCircle, props) : React.createElement(IconComponent, { name: 'alert', ...props });
+      const Check = (props) => window.Check ? React.createElement(window.Check, props) : React.createElement(IconComponent, { name: 'check', ...props });
+      const Calendar = (props) => window.Calendar ? React.createElement(window.Calendar, props) : React.createElement(IconComponent, { name: 'calendar', ...props });
+      const Clock = (props) => window.Clock ? React.createElement(window.Clock, props) : React.createElement(IconComponent, { name: 'clock', ...props });
+      const ArrowRight = (props) => window.ArrowRight ? React.createElement(window.ArrowRight, props) : React.createElement(IconComponent, { name: 'arrow', ...props });
+      const Star = (props) => window.Star ? React.createElement(window.Star, props) : React.createElement(IconComponent, { name: 'star', ...props });
+      const Rocket = (props) => window.Rocket ? React.createElement(window.Rocket, props) : React.createElement(IconComponent, { name: 'rocket', ...props });
+      const Shield = (props) => window.Shield ? React.createElement(window.Shield, props) : React.createElement(IconComponent, { name: 'shield', ...props });
+      // Weather icons
+      const Search = (props) => window.Search ? React.createElement(window.Search, props) : React.createElement(IconComponent, { name: 'search', ...props });
+      const Cloud = (props) => window.Cloud ? React.createElement(window.Cloud, props) : React.createElement(IconComponent, { name: 'cloud', ...props });
+      const Sun = (props) => window.Sun ? React.createElement(window.Sun, props) : React.createElement(IconComponent, { name: 'sun', ...props });
+      const CloudRain = (props) => window.CloudRain ? React.createElement(window.CloudRain, props) : React.createElement(IconComponent, { name: 'cloudrain', ...props });
+      const Wind = (props) => window.Wind ? React.createElement(window.Wind, props) : React.createElement(IconComponent, { name: 'wind', ...props });
+      const Thermometer = (props) => window.Thermometer ? React.createElement(window.Thermometer, props) : React.createElement(IconComponent, { name: 'thermometer', ...props });
+      const Droplets = (props) => window.Droplets ? React.createElement(window.Droplets, props) : React.createElement(IconComponent, { name: 'droplets', ...props });
       
       try {
         // Clean up the component code
         let cleanCode = \`${appContent
           .replace(/export\s+default\s+/g, '') // Remove export default
-          .replace(/import\s+.*?\s+from\s+['"`].*?['"`];?\s*\n/g, '') // Remove all import statements
+          .replace(/import\s+.*?\s+from\s+['"`]lucide-react['"`];?\s*\n/g, '') // Remove lucide-react imports (we provide them globally)
+          .replace(/import\s+.*?\s+from\s+['"`].*?['"`];?\s*\n/g, '') // Remove other import statements
           .replace(/import\s*\(\s*['"`].*?['"`]\s*\);?\s*\n/g, '') // Remove dynamic imports
           .replace(/const\s+\w+\s*=\s*require\s*\(['"`].*?['"`]\);?\s*\n/g, '') // Remove require statements
           .replace(/useState/g, 'React.useState') // Ensure React hooks are available

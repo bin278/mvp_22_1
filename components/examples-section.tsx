@@ -33,32 +33,32 @@ const translations = {
       {
         prompt: "Create an e-commerce product card with image carousel and add to cart",
         tags: ["E-commerce", "Interactive", "Responsive"],
-        preview: "/placeholder.jpg",
+        preview: "/ecommerce-product-card.svg",
       },
       {
         prompt: "Build a user profile page with avatar upload and social links",
         tags: ["Profile", "Upload", "Social"],
-        preview: "/placeholder-user.jpg",
+        preview: "/user-profile-page.svg",
       },
       {
         prompt: "Make a responsive navigation menu with mobile hamburger menu",
         tags: ["Navigation", "Mobile", "UX"],
-        preview: "/placeholder.svg",
+        preview: "/navigation-menu.svg",
       },
       {
         prompt: "Create a data visualization dashboard with charts and metrics",
         tags: ["Dashboard", "Charts", "Analytics"],
-        preview: "/placeholder.jpg",
+        preview: "/dashboard-charts.svg",
       },
       {
         prompt: "Build a contact form with validation and success message",
         tags: ["Form", "Validation", "UX"],
-        preview: "/placeholder.svg",
+        preview: "/contact-form.svg",
       },
       {
         prompt: "Design a blog post card with reading time and author info",
         tags: ["Blog", "Cards", "Content"],
-        preview: "/placeholder.jpg",
+        preview: "/blog-post-card.svg",
       },
     ],
   },
@@ -85,32 +85,32 @@ const translations = {
       {
         prompt: "创建一个电商产品卡片，带图片轮播和添加到购物车功能",
         tags: ["电商", "交互式", "响应式"],
-        preview: "/placeholder.jpg",
+        preview: "/ecommerce-product-card.svg",
       },
       {
         prompt: "构建一个用户资料页面，带头像上传和社交链接",
         tags: ["资料页", "上传", "社交"],
-        preview: "/placeholder-user.jpg",
+        preview: "/user-profile-page.svg",
       },
       {
         prompt: "制作一个响应式的导航菜单，带移动端汉堡菜单",
         tags: ["导航", "移动端", "用户体验"],
-        preview: "/placeholder.svg",
+        preview: "/navigation-menu.svg",
       },
       {
         prompt: "创建一个数据可视化仪表板，带图表和指标展示",
         tags: ["仪表板", "图表", "分析"],
-        preview: "/placeholder.jpg",
+        preview: "/dashboard-charts.svg",
       },
       {
         prompt: "构建一个联系表单，带验证和成功消息提示",
         tags: ["表单", "验证", "用户体验"],
-        preview: "/placeholder.svg",
+        preview: "/contact-form.svg",
       },
       {
         prompt: "设计一个博客文章卡片，带阅读时间和作者信息",
         tags: ["博客", "卡片", "内容"],
-        preview: "/placeholder.jpg",
+        preview: "/blog-post-card.svg",
       },
     ],
   },
@@ -128,7 +128,7 @@ export function ExamplesSection({ language }: ExamplesSectionProps) {
 
   return (
     <section id="examples" className="py-24 md:py-32 bg-secondary/30">
-      <div className="container">
+      <div className="container max-w-[95%] xl:max-w-[1400px] mx-auto">
         <div className="mx-auto max-w-2xl text-center mb-16">
           <h2 className="text-4xl font-bold mb-4 text-balance">{t.title}</h2>
           <p className="text-lg text-muted-foreground text-balance">{t.subtitle}</p>

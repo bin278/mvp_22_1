@@ -1,5 +1,7 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
+import { requireAuth } from '@/lib/auth/auth'
+import { add } from '@/lib/database/cloudbase'
 
 function formatCodeString(code: string): string {
   // Quick check: if code already has good formatting, return as-is
@@ -50,8 +52,8 @@ async function generateCodeWithRetry(prompt: string, maxRetries: number = 1) {
   const baseUrl = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com'
   const model = process.env.DEEPSEEK_MODEL || 'deepseek-chat'
 
-  if (!apiKey) {
-    throw new Error('DEEPSEEK_API_KEY is not configured')
+  if (!apiKey || apiKey === 'your_deepseek_api_key_here') {
+    throw new Error('DeepSeek API key is not configured. Please set DEEPSEEK_API_KEY in your environment variables. Get your API key from https://platform.deepseek.com/')
   }
 
   // Initialize OpenAI client with DeepSeek configuration
@@ -125,6 +127,17 @@ export async function POST(request: Request) {
   console.log('🚀 Starting code generation request')
 
   try {
+    // 认证用户
+    const authResult = await requireAuth(request as NextRequest)
+    if (!authResult.success) {
+      return NextResponse.json(
+        { error: authResult.error },
+        { status: 401 }
+      )
+    }
+
+    const user = authResult.user
+
     const { prompt } = await request.json()
 
     if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
@@ -464,6 +477,61 @@ code {
 
     const totalTime = performance.now()
     console.log(`✅ Total request time: ${(totalTime - startTime).toFixed(2)}ms`)
+
+    // 保存生成的项目到CloudBase数据库
+    try {
+      console.log('💾 Saving generated project to CloudBase...')
+
+      // 创建对话记录
+      const conversationData = {
+        user_id: user.id,
+        title: `Generated Project: ${parsedResponse.projectName || 'Unnamed Project'}`,
+        type: 'generation',
+        prompt: prompt,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+
+      const conversationResult = await add('conversations', conversationData)
+      const conversationId = conversationResult.id
+
+      console.log('📝 Conversation created with ID:', conversationId)
+
+      // 保存生成的文件
+      const filePromises = Object.entries(parsedResponse.files).map(async ([filePath, fileContent]) => {
+        const fileData = {
+          conversation_id: conversationId,
+          file_path: filePath,
+          file_content: fileContent,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+        return await add('conversation_files', fileData)
+      })
+
+      await Promise.all(filePromises)
+      console.log('📁 All files saved to CloudBase')
+
+      // 更新响应，包含对话ID
+      parsedResponse.conversationId = conversationId
+
+    } catch (saveError: any) {
+      console.error('❌ Failed to save project to CloudBase:', saveError)
+      console.error('错误详情:', saveError.message)
+
+      // 如果是集合不存在的错误，尝试提供更详细的错误信息
+      if (saveError.message && (saveError.message.includes('DATABASE_COLLECTION_NOT_EXIST') || saveError.message.includes('Db or Table not exist'))) {
+        console.error('🔍 解决方案：请在CloudBase控制台创建 conversation_files 集合')
+        console.error('   1. 访问 https://console.cloud.tencent.com/tcb')
+        console.error('   2. 选择你的环境')
+        console.error('   3. 点击"数据库"')
+        console.error('   4. 创建集合: conversation_files')
+        console.error('   5. 设置读取和写入权限为 true')
+      }
+
+      // 不阻止返回响应，但记录错误
+      parsedResponse.saveError = saveError.message
+    }
 
     // Return successful response
     console.log('Sending response with App.tsx preview:', parsedResponse.files?.['src/App.tsx']?.substring(0, 200).replace(/\n/g, '\\n'))

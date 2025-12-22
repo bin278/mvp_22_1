@@ -47,7 +47,7 @@ export function Header({ language, setLanguage }: HeaderProps) {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="container flex h-16 items-center justify-between">
+      <div className="container max-w-[95%] xl:max-w-[1400px] mx-auto flex h-16 items-center justify-between">
         <div className="flex items-center gap-8">
           <Link href="/" className="flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent">
@@ -62,9 +62,9 @@ export function Header({ language, setLanguage }: HeaderProps) {
             <a href="#examples" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               {t.examples}
             </a>
-            <a href="#pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <Link href="/payment" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               {t.pricing}
-            </a>
+            </Link>
           </nav>
         </div>
         <div className="flex items-center gap-4">

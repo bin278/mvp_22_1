@@ -4,6 +4,17 @@
 
 🌐 **Live at**: [mornhub.dev](https://mornhub.dev)
 
+## 🎉 数据迁移完成！
+
+✅ **所有数据已迁移到腾讯云CloudBase，包括GitHub集成、个人资料和支付订阅系统**
+- 用户认证系统
+- 支付记录
+- 生成的前端文件
+- 对话历史
+- 所有业务数据
+
+📖 **查看详情**：`CLOUDBASE_MIGRATION_COMPLETE.md`
+
 ## Overview
 
 mornFront is an AI-powered frontend code generator that transforms your ideas into production-ready React applications. Simply describe your UI idea, and get a complete, downloadable project with all necessary files to run locally.
@@ -64,6 +75,157 @@ npm run dev
 - `/api/preview-debug` - Debug preview generation
 
 All endpoints now use DeepSeek AI with OpenAI SDK instead of local template generation.
+
+## Authentication & Database Configuration
+
+### Default: Supabase
+The project uses Supabase by default for user authentication and data storage.
+
+### Optional: Tencent Cloud PostgreSQL
+You can migrate payment data to Tencent Cloud PostgreSQL for better performance and compliance.
+
+#### Setup Tencent Cloud Database
+
+1. **Purchase Tencent Cloud PostgreSQL**:
+   - Visit [Tencent Cloud PostgreSQL Console](https://console.cloud.tencent.com/postgresql)
+   - Create a PostgreSQL instance in your preferred region
+
+2. **Configure Environment Variables**:
+   ```env
+   # Switch to Tencent Cloud database
+   DATABASE_PROVIDER=tencent-cloud
+
+   # Tencent Cloud Database Configuration
+   TENCENT_CLOUD_DB_HOST=your_instance_address.tencentcdb.com
+   TENCENT_CLOUD_DB_PORT=5432
+   TENCENT_CLOUD_DB_NAME=your_database_name
+   TENCENT_CLOUD_DB_USER=postgres
+   TENCENT_CLOUD_DB_PASSWORD=your_password
+   ```
+
+3. **Initialize Database**:
+   ```bash
+   npm run db:setup
+   ```
+
+4. **Migrate Existing Data** (optional):
+   ```bash
+   npm run db:migrate
+   ```
+
+5. **Test Database Connection**:
+   ```bash
+   npm run db:test
+   ```
+
+#### Database Migration Details
+
+The migration process handles:
+- Payment records (`payments` table)
+- User subscriptions (`user_subscriptions` table)
+- Automatic index creation for performance
+- Data integrity verification
+
+See `TENCENT_CLOUD_DB_SETUP.md` for detailed configuration instructions.
+
+#### Optional: Tencent Cloud CloudBase
+You can use Tencent Cloud CloudBase (cloud development platform) for serverless database storage.
+
+##### Setup CloudBase Database
+
+1. **Create CloudBase Environment**:
+   - Visit [Tencent Cloud CloudBase Console](https://console.cloud.tencent.com/tcb)
+   - Create a new environment for your project
+
+2. **Get API Credentials**:
+   - Visit [Tencent Cloud API Key Management](https://console.cloud.tencent.com/cam/capi)
+   - Create and save your SecretId and SecretKey
+
+3. **Configure Environment Variables**:
+   ```env
+   # Switch to CloudBase database
+   DATABASE_PROVIDER=cloudbase
+
+   # CloudBase Configuration
+   TENCENT_CLOUD_SECRET_ID=your_secret_id
+   TENCENT_CLOUD_SECRET_KEY=your_secret_key
+   TENCENT_CLOUD_ENV_ID=your_environment_id
+   ```
+
+4. **Initialize CloudBase Collections**:
+   ```bash
+   npm run db:setup-cloudbase
+   ```
+
+5. **Test Database Connection**:
+   ```bash
+   npm run db:test
+   ```
+
+See `CLOUDBASE_DB_SETUP.md` for detailed CloudBase configuration instructions.
+
+#### Current: Tencent Cloud CloudBase Authentication
+The project uses Tencent Cloud CloudBase for user authentication and can optionally use CloudBase or Supabase for data storage.
+
+##### CloudBase Authentication Configuration
+
+1. **Configure Environment Variables**:
+   ```env
+   # Switch to CloudBase authentication
+   AUTH_PROVIDER=cloudbase
+   NEXT_PUBLIC_AUTH_PROVIDER=cloudbase
+
+   # CloudBase Configuration (same as database)
+   TENCENT_CLOUD_SECRET_ID=your_secret_id
+   TENCENT_CLOUD_SECRET_KEY=your_secret_key
+   TENCENT_CLOUD_ENV_ID=your_environment_id
+   ```
+
+2. **Test Authentication Service**:
+   ```bash
+   npm run auth:test-cloudbase
+   ```
+
+3. **Configure GitHub Integration**:
+   ```env
+   # GitHub OAuth Configuration
+   GITHUB_CLIENT_ID=your_github_client_id
+   GITHUB_CLIENT_SECRET=your_github_client_secret
+   ```
+
+   **GitHub App Setup**:
+   - Visit [GitHub Developer Settings](https://github.com/settings/developers)
+   - Create a new OAuth App
+   - Set Authorization callback URL to: `https://your-domain.com/api/github/callback`
+   - Copy Client ID and Client Secret to environment variables
+
+   **Note**: GitHub tokens are now stored in CloudBase `user_github_tokens` collection.
+
+4. **Configure Third-party Login** (optional):
+   - Visit CloudBase Console → Authentication → Login Settings
+   - Configure WeChat or other OAuth providers
+
+
+##### Authentication Features
+
+**前端SDK认证（必需）：**
+- CloudBase Web SDK提供完整的认证功能
+- 支持邮箱密码注册登录
+- 支持第三方登录（微信等）
+- 支持密码重置邮件
+- JWT令牌自动管理
+
+**集成步骤：**
+1. 安装CloudBase Web SDK: `npm install @cloudbase/js-sdk`
+2. 初始化应用并实现认证逻辑
+3. 参考 `CLOUDBASE_DB_SETUP.md` 获取详细代码示例
+
+**Node.js管理接口：**
+- 仅用于服务端管理操作
+- 不支持直接用户认证流程
+- 主要用于用户数据查询和管理
+
+See `CLOUDBASE_DB_SETUP.md` for detailed authentication configuration.
 
 ## Getting Started
 
@@ -327,6 +489,8 @@ Generate frontend code based on a text description.
 - **UI Components**: Radix UI primitives
 - **Icons**: Lucide React
 - **Language**: TypeScript
+- **Payment**: 支付宝 & 微信支付 (中国)
+- **Database**: Supabase / 腾讯云PostgreSQL / 腾讯云CloudBase (可选)
 
 ### Generated Projects
 - **Framework**: Vite + React 18
@@ -361,6 +525,22 @@ If downloads don't start:
 1. Check browser permissions for downloads
 2. Disable popup blockers temporarily
 3. Try a different browser
+
+### CloudBase Authentication Issues
+
+If you encounter `you can't request without auth` error:
+
+1. **Set Database Permissions**: Follow `CLOUDBASE_PERMISSION_SETUP.md` to configure database access permissions in CloudBase console
+2. **Check Environment Variables**: Ensure `TENCENT_CLOUD_ENV_ID`, `TENCENT_CLOUD_SECRET_ID`, and `TENCENT_CLOUD_SECRET_KEY` are correctly set
+3. **Verify Environment**: Make sure your CloudBase environment is active and accessible
+
+### Database Connection Issues
+
+If database operations fail:
+
+1. Run `node scripts/test-database.js` to test connection
+2. Check CloudBase console for any service interruptions
+3. Verify collection permissions in CloudBase database settings
 
 ## Future Enhancements
 

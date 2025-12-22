@@ -56,6 +56,9 @@ export function HeroSection({ language }: HeroSectionProps) {
 
   const handleGenerate = () => {
     if (!prompt.trim()) return
+
+    // Save the prompt to localStorage before navigating
+    localStorage.setItem('prefillPrompt', prompt.trim())
     router.push("/generate")
   }
 
@@ -70,7 +73,7 @@ export function HeroSection({ language }: HeroSectionProps) {
       <div className="absolute inset-0 grid-pattern opacity-50" />
       <div className="absolute inset-0 bg-gradient-to-b from-transparent via-background/50 to-background" />
 
-      <div className="container relative py-24 md:py-32">
+      <div className="container relative py-24 md:py-32 max-w-[95%] xl:max-w-[1400px] mx-auto">
         <div className="mx-auto max-w-4xl text-center">
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-card px-4 py-1.5 text-sm">
             <Sparkles className="h-4 w-4 text-accent" />

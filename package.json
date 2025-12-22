@@ -6,10 +6,54 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "next lint",
-    "start": "next start"
+    "start": "next start",
+
+    "db:setup": "node scripts/setup-tencent-cloud-db.js",
+    "db:setup-cloudbase": "node scripts/setup-cloudbase-db.js",
+    "db:migrate": "node scripts/migrate-to-tencent-cloud.js",
+    "db:test": "node scripts/test-database.js",
+    "auth:test-cloudbase": "node scripts/test-cloudbase-auth.js",
+
+    "docker:build": "docker build -t mvp22:latest .",
+    "docker:run": "docker run -p 3000:3000 --env-file .env.local mvp22:latest",
+    "docker:push": "echo '请先登录腾讯云镜像仓库: docker login ccr.ccs.tencentyun.com'",
+
+    "tencent:build": "docker build --platform linux/amd64 -t mvp22-tencent .",
+    "tencent:deploy": "echo '使用腾讯云控制台或 CLI 部署容器'",
+
+    "cloudbase:check": "node check-cloudbase-config.js",
+    "cloudbase:check-deploy": "node check-cloudbase-deployment.js",
+    "env:check": "node check-env-content.js",
+    "env:validate": "node check-env.js",
+    "payment:check": "node check-payment-env.js",
+
+    "deploy:prepare": "npm run env:check && npm run cloudbase:check && npm run payment:check",
+    "deploy:build": "npm run deploy:prepare && npm run docker:build",
+    "deploy:test": "npm run docker:run",
+
+    "health": "curl -f http://localhost:3000/api/health || exit 1",
+    "test:all": "npm run env:validate && npm run cloudbase:check && npm run payment:check && npm run health",
+
+    "cloudbase:login": "cloudbase login",
+    "cloudbase:deploy": "CLOUDBASE_BUILD=true cloudbase hosting:deploy",
+    "cloudbase:functions:deploy": "cloudbase functions:deploy",
+    "cloudbase:functions:deploy-email": "cloudbase functions:deploy sendEmailVerification",
+    "cloudbase:env:list": "cloudbase env:list",
+    "cloudbase:hosting:list": "cloudbase hosting:list",
+
+    "cloudbase:build": "node -e \"process.env.CLOUDBASE_BUILD='true'; require('child_process').execSync('npm run build', {stdio: 'inherit'})\"",
+    "cloudbase:full-deploy": "npm run cloudbase:functions:deploy-email && npm run cloudbase:deploy",
+    "cloudbase:auto-deploy": "node deploy-cloudbase.js",
+    "cloudbase:dry-run": "node deploy-cloudbase.js --dry-run",
+
+    "cloudbase:dev": "node -e \"process.env.CLOUDBASE_BUILD='true'; require('child_process').execSync('npm run dev', {stdio: 'inherit'})\"",
+    "cloudbase:test": "node -e \"process.env.CLOUDBASE_BUILD='true'; require('child_process').execSync('npm run test:all', {stdio: 'inherit'})\""
   },
   "dependencies": {
+    "@cloudbase/js-sdk": "^2.23.1",
+    "@cloudbase/node-sdk": "^3.12.0",
     "@hookform/resolvers": "^3.10.0",
+    "@octokit/rest": "^22.0.1",
     "@radix-ui/react-accordion": "1.2.2",
     "@radix-ui/react-alert-dialog": "1.1.4",
     "@radix-ui/react-aspect-ratio": "1.1.1",
@@ -45,6 +89,7 @@
     "cmdk": "1.0.4",
     "date-fns": "4.1.0",
     "embla-carousel-react": "8.5.1",
+    "framer-motion": "^12.23.26",
     "geist": "^1.3.1",
     "input-otp": "1.4.1",
     "jszip": "^3.10.1",
@@ -52,6 +97,10 @@
     "next": "15.2.4",
     "next-themes": "^0.4.6",
     "openai": "^6.9.1",
+    "qrcode": "^1.5.4",
+    "pg": "^8.11.3",
+    "alipay-sdk": "^3.4.0",
+    "axios": "^1.6.0",
     "react": "^19",
     "react-day-picker": "9.8.0",
     "react-dom": "^19",

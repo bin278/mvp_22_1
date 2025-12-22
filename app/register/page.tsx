@@ -9,8 +9,9 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Sparkles, Mail, Lock, User, Eye, EyeOff, CheckCircle } from "lucide-react"
+import { Sparkles, Mail, Lock, User, Eye, EyeOff, CheckCircle, Shield } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
+import { Separator } from "@/components/ui/separator"
 
 export default function RegisterPage() {
   const [formData, setFormData] = useState({
@@ -34,24 +35,30 @@ export default function RegisterPage() {
     if (error) setError("")
   }
 
+  // 邮箱验证函数
+  const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  }
+
   const validateForm = () => {
     if (!formData.email || !formData.password || !formData.confirmPassword || !formData.fullName) {
-      setError("Please fill in all fields")
+      setError("请填写所有字段")
       return false
     }
 
     if (formData.password.length < 6) {
-      setError("Password must be at least 6 characters")
+      setError("密码长度至少6位")
       return false
     }
 
     if (formData.password !== formData.confirmPassword) {
-      setError("Passwords do not match")
+      setError("两次密码输入不一致")
       return false
     }
 
     if (!acceptTerms) {
-      setError("Please accept the terms and conditions")
+      setError("请同意服务条款和隐私政策")
       return false
     }
 
@@ -60,25 +67,37 @@ export default function RegisterPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+
     if (!validateForm()) return
 
     setIsLoading(true)
     setError("")
 
     try {
-      const { error } = await signUp(formData.email, formData.password)
-      if (error) {
-        setError(error.message)
-      } else {
+      console.log('开始注册，邮箱:', formData.email)
+
+      // 调用直接注册API
+      const result = await signUp(formData.email, formData.password, {
+        full_name: formData.fullName
+      })
+
+      if (result.success) {
+        console.log('注册成功:', result.user)
         setSuccess(true)
+      } else {
+        console.error('注册失败:', result.error)
+        setError(result.error)
       }
+
     } catch (err: any) {
-      setError("An unexpected error occurred")
+      console.error('注册异常:', err)
+      setError("注册失败，请稍后重试")
     } finally {
       setIsLoading(false)
     }
   }
 
+  // 成功页面
   if (success) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-secondary/20 p-4">
@@ -87,30 +106,21 @@ export default function RegisterPage() {
             <div className="flex justify-center mb-4">
               <CheckCircle className="h-16 w-16 text-green-500" />
             </div>
-            <CardTitle className="text-2xl text-green-700">Registration Successful!</CardTitle>
+            <CardTitle className="text-2xl text-green-700">注册成功！</CardTitle>
             <CardDescription className="text-base">
-              We've sent a confirmation email to <strong>{formData.email}</strong>
+              欢迎加入！您的账户已成功注册。
             </CardDescription>
           </CardHeader>
           <CardContent className="text-center space-y-4">
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
               <p className="text-sm text-blue-800">
-                Please check your email and click the confirmation link to activate your account.
+                您现在可以使用您的邮箱和密码登录系统。
               </p>
-            </div>
-            <div className="text-sm text-muted-foreground">
-              Didn't receive the email? Check your spam folder or{" "}
-              <button
-                onClick={() => setSuccess(false)}
-                className="text-accent hover:underline"
-              >
-                try signing up again
-              </button>
             </div>
           </CardContent>
           <CardFooter>
             <Button onClick={() => router.push("/login")} className="w-full">
-              Go to Login
+              前往登录
             </Button>
           </CardFooter>
         </Card>
@@ -118,6 +128,7 @@ export default function RegisterPage() {
     )
   }
 
+  // 基本信息填写步骤
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-secondary/20 p-4">
       <Card className="w-full max-w-md">
@@ -127,9 +138,9 @@ export default function RegisterPage() {
               <Sparkles className="h-6 w-6 text-accent-foreground" />
             </div>
           </div>
-          <CardTitle className="text-2xl">Create Account</CardTitle>
+          <CardTitle className="text-2xl">创建账户</CardTitle>
           <CardDescription>
-            Join CodeGen AI and start building amazing UIs
+            加入CodeGen AI，开始构建精彩的UI界面
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -173,7 +184,7 @@ export default function RegisterPage() {
                 <Input
                   id="password"
                   type={showPassword ? "text" : "password"}
-                  placeholder="Create a password"
+                  placeholder="请输入密码（至少6位）"
                   value={formData.password}
                   onChange={(e) => handleInputChange("password", e.target.value)}
                   className="pl-10 pr-10"
@@ -190,13 +201,13 @@ export default function RegisterPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="confirmPassword">Confirm Password</Label>
+              <Label htmlFor="confirmPassword">确认密码</Label>
               <div className="relative">
                 <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="confirmPassword"
                   type={showConfirmPassword ? "text" : "password"}
-                  placeholder="Confirm your password"
+                  placeholder="请再次输入密码"
                   value={formData.confirmPassword}
                   onChange={(e) => handleInputChange("confirmPassword", e.target.value)}
                   className="pl-10 pr-10"
@@ -219,13 +230,13 @@ export default function RegisterPage() {
                 onCheckedChange={(checked) => setAcceptTerms(checked as boolean)}
               />
               <label htmlFor="terms" className="text-sm text-muted-foreground">
-                I agree to the{" "}
+                我同意{" "}
                 <Link href="/terms" className="text-accent hover:underline">
-                  Terms of Service
+                  服务条款
                 </Link>{" "}
-                and{" "}
+                和{" "}
                 <Link href="/privacy" className="text-accent hover:underline">
-                  Privacy Policy
+                  隐私政策
                 </Link>
               </label>
             </div>
@@ -237,15 +248,15 @@ export default function RegisterPage() {
             )}
 
             <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? "Creating Account..." : "Create Account"}
+              {isLoading ? "注册中..." : "注册账户"}
             </Button>
           </form>
         </CardContent>
         <CardFooter className="text-center">
           <div className="text-sm text-muted-foreground">
-            Already have an account?{" "}
+            已有账户？{" "}
             <Link href="/login" className="text-accent hover:underline">
-              Sign in
+              立即登录
             </Link>
           </div>
         </CardFooter>

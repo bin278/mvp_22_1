@@ -44,7 +44,7 @@ export function Footer({ language }: FooterProps) {
 
   return (
     <footer className="border-t border-border bg-card">
-      <div className="container py-12 md:py-16">
+      <div className="container max-w-[95%] xl:max-w-[1400px] mx-auto py-12 md:py-16">
         <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-4">
           <div className="lg:col-span-1">
             <div className="flex items-center gap-2 mb-4">
@@ -70,7 +70,7 @@ export function Footer({ language }: FooterProps) {
                 </a>
               </li>
               <li>
-                <a href="#" className="text-muted-foreground hover:text-foreground transition-colors">
+                <a href="/payment" className="text-muted-foreground hover:text-foreground transition-colors">
                   {t.pricing}
                 </a>
               </li>

@@ -87,7 +87,7 @@ export function FeaturesSection({ language }: FeaturesSectionProps) {
 
   return (
     <section id="features" className="py-24 md:py-32">
-      <div className="container">
+      <div className="container max-w-[95%] xl:max-w-[1400px] mx-auto">
         <div className="mx-auto max-w-2xl text-center mb-16">
           <h2 className="text-4xl font-bold mb-4 text-balance">{t.title}</h2>
           <p className="text-lg text-muted-foreground text-balance">{t.subtitle}</p>
