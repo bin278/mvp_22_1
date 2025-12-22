@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 
@@ -13,7 +13,7 @@ function isChinaRegion(): boolean {
   return true;
 }
 
-export default function AuthCallbackPage() {
+function AuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
@@ -34,10 +34,11 @@ export default function AuthCallbackPage() {
         if (isChinaRegion()) {
           // 解析 state 参数获取跳转路径
           let nextTarget = '/';
-          if (stateParam) {
+          if (stateParam && typeof window !== 'undefined') {
             try {
+              // 在客户端使用 btoa/atob 替代 Buffer
               const stateData = JSON.parse(
-                Buffer.from(stateParam, 'base64').toString()
+                atob(stateParam)
               );
               nextTarget = stateData.next || '/';
             } catch (e) {
@@ -133,5 +134,21 @@ export default function AuthCallbackPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8 text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-blue-500 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">正在加载</h2>
+          <p className="text-gray-600">请稍候...</p>
+        </div>
+      </div>
+    }>
+      <AuthCallbackContent />
+    </Suspense>
   );
 }
