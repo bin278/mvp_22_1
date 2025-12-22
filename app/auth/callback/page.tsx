@@ -1,220 +1,137 @@
-"use client"
+'use client';
 
-import { useEffect, useState, Suspense } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import { useAuth } from '@/lib/auth-context'
-import { supabase } from '@/lib/supabase'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Sparkles, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
+import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 
-// 禁用静态生成，强制动态渲染
-export const dynamic = 'force-dynamic';
-
-function AuthCallbackContent() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const { user, loading } = useAuth()
-  const [hasProcessed, setHasProcessed] = useState(false)
-
-  useEffect(() => {
-    if (hasProcessed) return
-
-    const processAuth = async () => {
-      // Check for hash fragments first (OAuth callback - Google, etc.)
-      const hash = window.location.hash
-      if (hash) {
-        const params = new URLSearchParams(hash.substring(1))
-        const accessToken = params.get('access_token')
-        const error = params.get('error')
-
-        if (error) {
-          // Error in hash, stay on page to show error
-          setHasProcessed(true)
-          return
-        }
-
-        if (accessToken) {
-          // Has access token in hash
-          // Supabase client automatically processes hash fragments
-          // Wait a bit for Supabase to process it
-          const timer = setTimeout(() => {
-            if (user) {
-              setHasProcessed(true)
-              // Clear hash and redirect
-              window.history.replaceState(null, '', window.location.pathname)
-              router.replace('/')
-            }
-          }, 2000)
-
-          return () => clearTimeout(timer)
-        }
-      }
-
-      // Check for code in query params (PKCE flow)
-      const code = searchParams.get('code')
-      if (code && supabase) {
-        try {
-          // Exchange code for session
-          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
-          
-          if (exchangeError) {
-            console.error('Code exchange error:', exchangeError)
-            setHasProcessed(true)
-            router.replace('/login?error=code_exchange_failed')
-            return
-          }
-
-          // Code exchanged successfully, wait for auth state to update
-          const timer = setTimeout(() => {
-            if (user) {
-              setHasProcessed(true)
-              // Clear query params and redirect
-              window.history.replaceState(null, '', window.location.pathname)
-              router.replace('/')
-            } else if (!loading) {
-              setHasProcessed(true)
-              router.replace('/login?error=auth_failed')
-            }
-          }, 1500)
-
-          return () => clearTimeout(timer)
-        } catch (err) {
-          console.error('Code exchange exception:', err)
-          setHasProcessed(true)
-          router.replace('/login?error=code_exchange_failed')
-          return
-        }
-      }
-
-      // No hash or code, check if already authenticated
-      if (user) {
-        setHasProcessed(true)
-        router.replace('/')
-        return
-      }
-
-      // No hash, no code, not authenticated, and done loading - redirect to login
-      if (!loading) {
-        setHasProcessed(true)
-        router.replace('/login?error=auth_failed')
-      }
-    }
-
-    processAuth()
-  }, [user, loading, router, searchParams, hasProcessed])
-
-  // Check for errors in URL hash
-  const hash = typeof window !== 'undefined' ? window.location.hash : ''
-  const params = new URLSearchParams(hash.substring(1))
-  const error = params.get('error')
-  const errorDescription = params.get('error_description')
-
-  if (error) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-secondary/20 p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="flex justify-center mb-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
-                <AlertCircle className="h-6 w-6 text-destructive" />
-              </div>
-            </div>
-            <CardTitle className="text-2xl">Authentication Error</CardTitle>
-            <CardDescription>
-              There was an error during authentication
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Alert variant="destructive">
-              <AlertDescription>
-                <strong>Error:</strong> {error}
-                {errorDescription && (
-                  <>
-                    <br />
-                    <strong>Details:</strong> {errorDescription}
-                  </>
-                )}
-              </AlertDescription>
-            </Alert>
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={() => router.push('/login')}
-                className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-              >
-                Go to Login
-              </button>
-              <button
-                onClick={() => router.push('/')}
-                className="w-full px-4 py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/80"
-              >
-                Go to Home
-              </button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    )
+// 检查是否为中国区域
+function isChinaRegion(): boolean {
+  if (typeof window !== 'undefined') {
+    // 从localStorage或其他地方获取区域信息
+    return true; // 默认为中国区域
   }
-
-  if (user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-secondary/20 p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="flex justify-center mb-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-500/10">
-                <CheckCircle className="h-6 w-6 text-green-500" />
-              </div>
-            </div>
-            <CardTitle className="text-2xl">Authentication Successful</CardTitle>
-            <CardDescription>
-              Redirecting you to the home page...
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex justify-center">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-secondary/20 p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="flex justify-center mb-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-accent">
-              <Sparkles className="h-6 w-6 text-accent-foreground" />
-            </div>
-          </div>
-          <CardTitle className="text-2xl">Completing Authentication</CardTitle>
-          <CardDescription>
-            Please wait while we complete your login...
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </CardContent>
-      </Card>
-    </div>
-  )
+  return true;
 }
 
 export default function AuthCallbackPage() {
-  return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-secondary/20 p-4">
-        <Card className="w-full max-w-md">
-          <CardContent className="flex justify-center pt-6">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          </CardContent>
-        </Card>
-      </div>
-    }>
-      <AuthCallbackContent />
-    </Suspense>
-  )
-}
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const [message, setMessage] = useState('正在处理认证...');
 
+  useEffect(() => {
+    const handleCallback = async () => {
+      try {
+        // 获取URL参数
+        const code = searchParams.get('code');
+        const stateParam = searchParams.get('state');
+
+        if (!code) {
+          throw new Error('缺少授权码参数');
+        }
+
+        // 中国区域：处理微信 OAuth 回调
+        if (isChinaRegion()) {
+          // 解析 state 参数获取跳转路径
+          let nextTarget = '/';
+          if (stateParam) {
+            try {
+              const stateData = JSON.parse(
+                Buffer.from(stateParam, 'base64').toString()
+              );
+              nextTarget = stateData.next || '/';
+            } catch (e) {
+              console.warn('[WeChat Callback] Failed to parse state:', e);
+              // 如果解析失败，使用默认路径
+            }
+          }
+
+          console.log(`[WeChat Callback] Processing callback, next target: ${nextTarget}`);
+
+          // 调用后端 API 完成微信登录
+          const response = await fetch('/api/auth/wechat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code, state: stateParam }),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || '认证失败');
+          }
+
+          if (data.success) {
+            setMessage('登录成功，正在跳转...');
+            setStatus('success');
+
+            // 保存认证状态到 localStorage
+            const { saveAuthState } = await import('@/lib/auth/auth-state-manager');
+            await saveAuthState(
+              data.accessToken,
+              data.refreshToken,
+              data.user,
+              data.tokenMeta
+            );
+
+            console.log(`[WeChat Callback] Authentication successful, redirecting to: ${nextTarget}`);
+
+            // 短暂延迟后跳转
+            setTimeout(() => {
+              router.replace(nextTarget);
+            }, 1500);
+
+          } else {
+            throw new Error(data.error || '认证失败');
+          }
+
+        } else {
+          throw new Error('不支持的区域');
+        }
+
+      } catch (error) {
+        console.error('[Auth Callback] Error:', error);
+        setStatus('error');
+        setMessage(error instanceof Error ? error.message : '认证过程中发生错误');
+      }
+    };
+
+    handleCallback();
+  }, [searchParams, router]);
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8 text-center">
+        {status === 'loading' && (
+          <>
+            <Loader2 className="h-12 w-12 animate-spin text-blue-500 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">正在验证身份</h2>
+            <p className="text-gray-600">{message}</p>
+          </>
+        )}
+
+        {status === 'success' && (
+          <>
+            <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">认证成功</h2>
+            <p className="text-gray-600">{message}</p>
+          </>
+        )}
+
+        {status === 'error' && (
+          <>
+            <XCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">认证失败</h2>
+            <p className="text-gray-600 mb-4">{message}</p>
+            <button
+              onClick={() => router.push('/login')}
+              className="w-full bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition-colors"
+            >
+              返回登录页面
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

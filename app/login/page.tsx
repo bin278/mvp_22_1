@@ -12,17 +12,25 @@ import { Sparkles, Mail, Lock, Eye, EyeOff } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { Separator } from "@/components/ui/separator"
 
+// 微信登录图标组件
+const WechatIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
+    <path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 0 1 .213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 0 0 .167-.054l1.903-1.114a.864.864 0 0 1 .717-.098 10.16 10.16 0 0 0 2.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348z"/>
+  </svg>
+)
+
 export default function LoginPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [isWechatLoading, setIsWechatLoading] = useState(false)
   const [error, setError] = useState("")
   const [resetEmail, setResetEmail] = useState("")
   const [showResetForm, setShowResetForm] = useState(false)
   const [resetMessage, setResetMessage] = useState("")
 
-  const { signIn, resetPassword } = useAuth()
+  const { signIn, signInWithWechat, resetPassword } = useAuth()
   const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -41,6 +49,34 @@ export default function LoginPage() {
       setError("An unexpected error occurred")
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleWechatLogin = async () => {
+    setIsWechatLoading(true)
+    setError("")
+
+    try {
+      // 1. 获取微信登录二维码 URL
+      const nextPath = '/'
+      const response = await fetch(`/api/auth/wechat/qrcode?next=${encodeURIComponent(nextPath)}`)
+
+      if (!response.ok) {
+        throw new Error('获取微信登录二维码失败')
+      }
+
+      const data = await response.json()
+
+      if (!data.supported || !data.qrcodeUrl) {
+        throw new Error('微信登录暂不支持或配置错误')
+      }
+
+      // 2. 重定向到微信授权页面
+      window.location.href = data.qrcodeUrl
+
+    } catch (err: any) {
+      setError(err.message || "微信登录过程中发生错误")
+      setIsWechatLoading(false)
     }
   }
 
@@ -181,6 +217,34 @@ export default function LoginPage() {
               {isLoading ? "Signing in..." : "Sign In"}
             </Button>
           </form>
+
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <Separator />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-background px-2 text-muted-foreground">Or continue with</span>
+            </div>
+          </div>
+
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={handleWechatLogin}
+            disabled={isWechatLoading || isLoading}
+          >
+            <WechatIcon />
+            <span className="ml-2">
+              {isWechatLoading ? "Connecting..." : "Continue with WeChat"}
+            </span>
+          </Button>
+
+          {error && (
+            <Alert variant="destructive" className="mt-4">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
         </CardContent>
         <CardFooter className="flex flex-col space-y-4">
           <div className="text-center text-sm text-muted-foreground">

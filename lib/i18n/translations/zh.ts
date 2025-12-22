@@ -672,8 +672,8 @@ export const zh = {
 
   // ==================== Pricing Page ====================
   pricing: {
-    title: "解锁辰汇个性推荐平台",
-    subtitle: "解锁辰汇个性推荐平台的全部功能",
+    title: "订阅计划",
+    subtitle: "选择适合您的订阅计划，解锁更多高级功能",
     back: "返回",
     current: "当前",
     currentPlan: "当前计划",

@@ -149,6 +149,127 @@ export const signOut = async () => {
   return { success: true };
 };
 
+// 微信登录
+export const signInWithWechat = async () => {
+  console.log('开始微信登录流程');
+
+  try {
+    // 获取CloudBase认证实例
+    const auth = getAuth();
+    if (!auth) {
+      return {
+        success: false,
+        error: '认证服务不可用'
+      };
+    }
+
+    // 使用CloudBase的微信登录
+    const loginResult = await auth.signInWithProvider({
+      provider: 'WEIXIN_WEB',
+      appid: process.env.NEXT_PUBLIC_WECHAT_APP_ID || 'wxdcd6dda48f3245e1',
+      scope: 'snsapi_login'
+    });
+
+    console.log('微信登录结果:', loginResult);
+
+    if (loginResult.success) {
+      // 获取用户信息
+      const userInfo = await auth.getUserInfo();
+      console.log('微信用户信息:', userInfo);
+
+      return {
+        success: true,
+        user: {
+          uid: userInfo.uid,
+          username: userInfo.username || userInfo.nickname,
+          name: userInfo.nickname,
+          avatar: userInfo.avatar,
+          email: userInfo.email,
+          loginType: 'wechat'
+        }
+      };
+    } else {
+      return {
+        success: false,
+        error: loginResult.error?.message || '微信登录失败'
+      };
+    }
+
+  } catch (error: any) {
+    console.error('微信登录失败:', error);
+
+    let errorMessage = '微信登录失败，请稍后重试';
+
+    if (error && typeof error === 'object') {
+      errorMessage = error.message || error.msg || error.error || error.code || error.toString() || errorMessage;
+    } else if (typeof error === 'string') {
+      errorMessage = error;
+    }
+
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+};
+
+// 密码重置（简化版）
+export const resetPassword = async (email: string) => {
+  console.log('密码重置请求，邮箱:', email);
+
+  // 验证邮箱格式
+  if (!validateEmail(email)) {
+    return {
+      success: false,
+      error: '邮箱格式不正确，请输入有效的邮箱地址'
+    };
+  }
+
+  try {
+    // 通过API路由处理密码重置
+    const response = await fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: email
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: result.error || '密码重置失败'
+      };
+    }
+
+    console.log('密码重置邮件已发送');
+    return {
+      success: true,
+      message: '密码重置邮件已发送，请检查您的邮箱'
+    };
+
+  } catch (error: any) {
+    console.error('密码重置失败:', error);
+
+    let errorMessage = '密码重置失败，请稍后重试';
+
+    if (error && typeof error === 'object') {
+      errorMessage = error.message || error.msg || error.error || error.code || error.toString() || errorMessage;
+    } else if (typeof error === 'string') {
+      errorMessage = error;
+    }
+
+    return {
+      success: false,
+      error: errorMessage
+    };
+  }
+};
+
 // 监听认证状态变化（简化版）
 export const setupAuthStateListener = (callback: (user: any) => void) => {
   // CloudBase文档数据库模式下，我们不使用自动状态监听
