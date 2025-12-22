@@ -163,10 +163,22 @@ export const signInWithWechat = async () => {
       };
     }
 
+    // 获取微信AppID（在CloudBase环境中通过API获取）
+    let appId = 'wxdcd6dda48f3245e1'; // 默认值
+    try {
+      const response = await fetch('/api/env');
+      if (response.ok) {
+        const data = await response.json();
+        appId = data.env?.NEXT_PUBLIC_WECHAT_APP_ID || appId;
+      }
+    } catch (error) {
+      console.warn('Failed to fetch WECHAT_APP_ID from API, using default:', error);
+    }
+
     // 使用CloudBase的微信登录
     const loginResult = await auth.signInWithProvider({
       provider: 'WEIXIN_WEB',
-      appid: process.env.NEXT_PUBLIC_WECHAT_APP_ID || 'wxdcd6dda48f3245e1',
+      appid: appId,
       scope: 'snsapi_login'
     });
 

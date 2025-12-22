@@ -77,8 +77,15 @@ interface AuthContextType {
 
 // 获取认证提供商
 function getAuthProvider(): 'supabase' | 'cloudbase' | 'mock' {
-  const provider = process.env.NEXT_PUBLIC_AUTH_PROVIDER || 'supabase';
-  return provider as 'supabase' | 'cloudbase' | 'mock';
+  // 在服务器端可以直接访问环境变量
+  if (typeof window === 'undefined') {
+    const provider = process.env.NEXT_PUBLIC_AUTH_PROVIDER || 'cloudbase';
+    return provider as 'supabase' | 'cloudbase' | 'mock';
+  }
+
+  // 在客户端，CloudBase环境默认使用cloudbase
+  // 如果需要动态获取，可以通过API调用
+  return 'cloudbase';
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)

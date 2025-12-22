@@ -1,13 +1,17 @@
 /**
  * 客户端环境变量获取工具
- * 在腾讯云部署时，通过 API 获取环境变量而不是直接访问 process.env
+ * 在腾讯云CloudBase部署时，通过 API 获取环境变量而不是直接访问 process.env
  */
 
 interface PublicEnv {
-  NEXT_PUBLIC_SUPABASE_URL: string
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: string
-  NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: string
-  NEXT_PUBLIC_APP_URL: string
+  // 应用配置
+  NEXT_PUBLIC_APP_URL?: string
+  NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID?: string
+  NEXT_PUBLIC_WECHAT_APP_ID?: string
+
+  // 部署环境信息
+  DEPLOYMENT_REGION?: string
+  NODE_ENV?: string
 }
 
 let envCache: PublicEnv | null = null
@@ -19,33 +23,34 @@ let envPromise: Promise<PublicEnv> | null = null
 async function fetchEnvFromAPI(): Promise<PublicEnv> {
   try {
     const response = await fetch('/api/env', {
-      cache: 'force-cache', // 使用浏览器缓存
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      // 使用浏览器缓存，避免每次都请求
+      cache: 'force-cache',
     })
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch env: ${response.statusText}`)
+      throw new Error(`Failed to fetch env: ${response.status} ${response.statusText}`)
     }
 
-    const env = await response.json()
-    return env as PublicEnv
+    const data = await response.json()
+
+    if (!data.success) {
+      throw new Error(data.error || 'API returned error')
+    }
+
+    return data.env as PublicEnv
   } catch (error) {
     console.error('Failed to fetch environment variables from API:', error)
-    // 如果 API 失败，尝试使用 process.env（开发环境）
-    if (typeof window === 'undefined') {
-      // 服务器端回退
-      return {
-        NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
-        NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '',
-        NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL || '',
-      }
-    }
-    // 客户端回退
+    // 如果 API 失败，使用开发环境回退值
     return {
-      NEXT_PUBLIC_SUPABASE_URL: '',
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: '',
-      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: '',
-      NEXT_PUBLIC_APP_URL: '',
+      NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
+      NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID: process.env.NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID || '',
+      NEXT_PUBLIC_WECHAT_APP_ID: process.env.NEXT_PUBLIC_WECHAT_APP_ID || '',
+      DEPLOYMENT_REGION: process.env.DEPLOYMENT_REGION || 'cn',
+      NODE_ENV: process.env.NODE_ENV || 'development',
     }
   }
 }
@@ -79,24 +84,14 @@ export async function getPublicEnv(): Promise<PublicEnv> {
  */
 export function getPublicEnvSync(): PublicEnv {
   if (!envCache) {
-    // 如果缓存未初始化，尝试从 process.env 获取（开发环境回退）
-    if (typeof window !== 'undefined') {
-      // 客户端：如果缓存未初始化，返回空值（应该先调用 getPublicEnv）
-      console.warn('Environment variables not initialized. Call getPublicEnv() first.')
-      return {
-        NEXT_PUBLIC_SUPABASE_URL: '',
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: '',
-        NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: '',
-        NEXT_PUBLIC_APP_URL: '',
-      }
-    } else {
-      // 服务器端：直接使用 process.env
-      return {
-        NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
-        NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '',
-        NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL || '',
-      }
+    // 如果缓存未初始化，返回开发环境默认值
+    console.warn('Environment variables not initialized. Call getPublicEnv() first.')
+    return {
+      NEXT_PUBLIC_APP_URL: 'http://localhost:3000',
+      NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID: '',
+      NEXT_PUBLIC_WECHAT_APP_ID: '',
+      DEPLOYMENT_REGION: 'cn',
+      NODE_ENV: 'development',
     }
   }
   return envCache

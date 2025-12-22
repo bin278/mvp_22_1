@@ -6,29 +6,33 @@ let app: any = null;
 let authInstance: any = null;
 
 // 初始化CloudBase应用
-export function initializeCloudBase() {
+export async function initializeCloudBase(): Promise<any> {
   if (!app && typeof window !== 'undefined') {
-    // 检查环境变量
-    const envId = process.env.NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID;
-
-    if (!envId || envId === 'your-env-id' || envId === 'your_environment_id_here') {
-      console.error('❌ CloudBase环境ID未正确配置。请检查 NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID 环境变量。');
-      console.error('📖 配置步骤：');
-      console.error('   1. 复制 CLOUDBASE_ENV_EXAMPLE.env 到 .env.local');
-      console.error('   2. 访问 https://console.cloud.tencent.com/tcb 获取环境ID');
-      console.error('   3. 填入正确的环境ID并重启服务器');
-      console.error('📖 详细指南：查看 CLOUDBASE_QUICK_SETUP.md');
-      return null;
-    }
-
-    console.log('🔧 使用CloudBase环境ID:', envId);
-
     try {
+      // 从API异步获取环境变量
+      const { getPublicEnv } = await import('./env-client');
+      const env = await getPublicEnv();
+      const envId = env.TENCENT_CLOUD_ENV_ID;
+
+      if (!envId || envId === 'your-env-id' || envId === 'your_environment_id_here') {
+        console.error('❌ CloudBase环境ID未正确配置。请在腾讯云控制台设置 TENCENT_CLOUD_ENV_ID 环境变量。');
+        console.error('📖 配置步骤：');
+        console.error('   1. 登录腾讯云控制台');
+        console.error('   2. 进入 CloudBase 云托管服务');
+        console.error('   3. 在环境变量中添加 TENCENT_CLOUD_ENV_ID');
+        console.error('   4. 重启服务');
+        console.error('📖 详细指南：查看 CLOUDBASE_CLOUD_HOSTING_DEPLOYMENT.md');
+        return null;
+      }
+
+      console.log('🔧 使用CloudBase环境ID:', envId);
+
       app = cloudbase.init({
         env: envId,
-        region: 'ap-shanghai', // 根据实际情况设置地域
+        region: 'ap-guangzhou', // 广州地域
       });
       console.log('CloudBase前端SDK初始化成功，环境ID:', envId);
+
     } catch (error) {
       console.error('CloudBase初始化失败:', error);
       return null;
@@ -38,17 +42,17 @@ export function initializeCloudBase() {
 }
 
 // 获取CloudBase应用实例
-export function getCloudBaseApp() {
+export async function getCloudBaseApp(): Promise<any> {
   if (!app) {
-    return initializeCloudBase();
+    return await initializeCloudBase();
   }
   return app;
 }
 
 // 获取认证实例（确保只有一个实例）
-export function getAuth() {
+export async function getAuth(): Promise<any> {
   if (!authInstance) {
-    const app = getCloudBaseApp();
+    const app = await getCloudBaseApp();
     if (app) {
       authInstance = app.auth();
       console.log('CloudBase认证实例创建成功');
@@ -60,7 +64,7 @@ export function getAuth() {
 }
 
 // 获取数据库实例
-export function getDatabase() {
-  const app = getCloudBaseApp();
+export async function getDatabase(): Promise<any> {
+  const app = await getCloudBaseApp();
   return app?.database();
 }

@@ -3,15 +3,23 @@ import { getPublicEnv, PublicEnv } from '@/lib/env-client'
 
 /**
  * React Hook: 在客户端组件中获取环境变量
- * 
+ *
+ * 在腾讯云CloudBase部署时，环境变量通过API获取而不是直接访问process.env
+ *
  * @example
  * ```tsx
  * function MyComponent() {
  *   const { env, loading } = useEnv()
- *   
+ *
  *   if (loading) return <div>Loading...</div>
- *   
- *   return <div>Supabase URL: {env.NEXT_PUBLIC_SUPABASE_URL}</div>
+ *
+ *   return (
+ *     <div>
+ *       <p>App URL: {env.NEXT_PUBLIC_APP_URL}</p>
+ *       <p>WeChat App ID: {env.NEXT_PUBLIC_WECHAT_APP_ID}</p>
+ *       <p>Region: {env.DEPLOYMENT_REGION}</p>
+ *     </div>
+ *   )
  * }
  * ```
  */
