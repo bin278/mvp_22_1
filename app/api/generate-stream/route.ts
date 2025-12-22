@@ -136,11 +136,19 @@ export async function POST(request: NextRequest) {
       return
     }
 
-    if (!apiKey || apiKey === 'your_deepseek_api_key_here') {
-      console.error('DEEPSEEK_API_KEY is not configured or using placeholder value')
+    // 检查API key是否正确配置
+    const placeholderKeys = [
+      'your_deepseek_api_key_here',
+      'your_glm_api_key_here',
+      'your_openai_api_key_here',
+      'your_anthropic_api_key_here'
+    ]
+
+    if (!apiKey || placeholderKeys.includes(apiKey)) {
+      console.error(`${modelConfig.provider} API key is not configured or using placeholder value`)
       const errorData = {
         type: 'error',
-        error: 'DeepSeek API key is not configured. Please set DEEPSEEK_API_KEY in your environment variables.'
+        error: `${modelConfig.provider} API key is not configured. Please set the appropriate API key in your CloudBase environment variables.`
       }
       safeEnqueue(`data: ${JSON.stringify(errorData)}\n\n`)
       safeEnqueue(`data: [DONE]\n\n`)

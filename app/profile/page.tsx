@@ -49,7 +49,7 @@ function ProfilePageContent() {
         setIsLoadingSubscription(true)
         console.log('Loading subscription info for CloudBase user')
 
-        const response = await fetch('/api/user/subscription', {
+        const response = await fetch('/api/subscription/status', {
           headers: {
             'Authorization': `Bearer ${session.accessToken}`,
           },
