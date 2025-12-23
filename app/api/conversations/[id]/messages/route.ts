@@ -57,6 +57,7 @@ export async function POST(
     // 添加消息
     const messageData = {
       conversation_id: conversationId,
+      user_id: user.id,  // 确保消息包含用户标识
       role,
       content,
       created_at: new Date().toISOString()

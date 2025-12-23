@@ -39,16 +39,22 @@ export async function GET(
 
     const conversation = conversationResult.data[0]
 
-    // 获取消息
+    // 获取消息（确保只返回当前用户的消息）
     const messagesResult = await query("conversation_messages", {
-      where: { conversation_id: conversationId },
+      where: {
+        conversation_id: conversationId,
+        user_id: user.id  // 额外的安全验证
+      },
       orderBy: "created_at",
       orderDirection: "asc"
     })
 
-    // 获取文件
+    // 获取文件（确保只返回当前用户的文件）
     const filesResult = await query("conversation_files", {
-      where: { conversation_id: conversationId },
+      where: {
+        conversation_id: conversationId,
+        user_id: user.id  // 额外的安全验证
+      },
       orderBy: "created_at",
       orderDirection: "asc"
     })
