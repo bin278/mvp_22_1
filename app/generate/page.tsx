@@ -334,6 +334,29 @@ function GeneratePageContent() {
     }
   }
 
+  const saveMessageToConversation = async (conversationId: string, role: 'user' | 'assistant', content: string) => {
+    if (!conversationId || !authSession?.accessToken) return
+
+    try {
+      const response = await fetch(`/api/conversations/${conversationId}/messages`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authSession.accessToken}`,
+        },
+        body: JSON.stringify({ role, content }),
+      })
+
+      if (!response.ok) {
+        console.error("Failed to save message to conversation")
+      } else {
+        console.log(`✅ Saved ${role} message to conversation ${conversationId}`)
+      }
+    } catch (error) {
+      console.error("Error saving message to conversation:", error)
+    }
+  }
+
   // 保存文件到数据库
   const saveFiles = async (files: Record<string, string>) => {
     if (!currentConversationId || !authSession?.accessToken || !files) return
@@ -627,9 +650,11 @@ function GeneratePageContent() {
     setStreamingCode('')
     setGeneratedProject(null)
 
-    // 如果没有当前对话，创建新对话
-    if (!currentConversationId && authSession?.accessToken) {
+    // 确保有对话ID，如果没有则创建新对话
+    let conversationIdToUse = currentConversationId
+    if (!conversationIdToUse && authSession?.accessToken) {
       try {
+        console.log('📝 Creating new conversation...')
         const response = await fetch("/api/conversations/create", {
           method: "POST",
           headers: {
@@ -643,11 +668,22 @@ function GeneratePageContent() {
 
         if (response.ok) {
           const data = await response.json()
-          setCurrentConversationId(data.conversation.id)
+          conversationIdToUse = data.conversation.id
+          setCurrentConversationId(conversationIdToUse)
+          console.log('✅ Created conversation:', conversationIdToUse)
+        } else {
+          console.error('❌ Failed to create conversation:', response.status)
+          throw new Error('Failed to create conversation')
         }
       } catch (error) {
         console.error("Error creating conversation:", error)
+        throw error
       }
+    }
+
+    // 确保有对话ID才继续
+    if (!conversationIdToUse) {
+      throw new Error('No conversation ID available')
     }
 
     // Add user message to conversation history
@@ -658,11 +694,10 @@ function GeneratePageContent() {
       timestamp: new Date()
     }
     setMessages(prev => [...prev, userMessage])
-    
+
     // 保存用户消息到数据库
-    if (currentConversationId) {
-      await saveMessage('user', trimmedPrompt)
-    }
+    console.log('💾 Saving user message to conversation:', conversationIdToUse)
+    await saveMessageToConversation(conversationIdToUse, 'user', trimmedPrompt)
 
     try {
       // 先使用测试API检查连接
@@ -718,7 +753,7 @@ function GeneratePageContent() {
         body: JSON.stringify({
           prompt: prompt.trim(),
           model: selectedModel,
-          conversationId: currentConversationId
+          conversationId: conversationIdToUse
         }),
         signal: controller.signal,
       })
