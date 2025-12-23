@@ -3,7 +3,7 @@
 
 import { NextRequest } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { verifyToken, CloudBaseUser } from './cloudbase-auth';
+import { verifyToken, verifySessionToken, CloudBaseUser } from './cloudbase-auth';
 
 // 获取认证提供商
 function getAuthProvider(): 'supabase' | 'cloudbase' {
@@ -66,14 +66,25 @@ export async function requireAuth(request: NextRequest): Promise<AuthResult> {
         if (isDev) {
           console.log("开发环境：模拟用户认证");
 
-          // 开发环境：尝试验证JWT token，如果失败则使用默认用户
+          // 开发环境：尝试验证token（支持JWT和Session），如果失败则使用默认用户
           if (token && token !== "dev-token") {
             try {
-              console.log("开发环境：尝试验证JWT token...");
-              const verifiedUser = await verifyToken(token);
+              let verifiedUser = null;
+
+              // 首先尝试Session token
+              if (token.startsWith('session_')) {
+                console.log("开发环境：尝试验证Session token...");
+                verifiedUser = await verifySessionToken(token);
+              }
+
+              // 然后尝试JWT token
+              if (!verifiedUser) {
+                console.log("开发环境：尝试验证JWT token...");
+                verifiedUser = await verifyToken(token);
+              }
 
               if (verifiedUser) {
-                console.log(`✅ 开发环境JWT验证成功，用户: ${verifiedUser.email || verifiedUser.id}`);
+                console.log(`✅ 开发环境token验证成功，用户: ${verifiedUser.email || verifiedUser.id}`);
                 return {
                   success: true,
                   user: {
@@ -87,14 +98,14 @@ export async function requireAuth(request: NextRequest): Promise<AuthResult> {
                   token: token,
                 };
               } else {
-                console.log("开发环境：JWT验证失败，使用默认用户");
+                console.log("开发环境：所有token验证失败，使用默认用户");
               }
             } catch (error) {
-              console.log("开发环境：JWT验证异常，使用默认用户:", error.message);
+              console.log("开发环境：token验证异常，使用默认用户:", error.message);
             }
           }
 
-          // JWT验证失败或无token，使用默认开发用户
+          // Token验证失败或无token，使用默认开发用户
           console.log("开发环境：使用默认用户");
           return {
             success: true,
@@ -107,7 +118,7 @@ export async function requireAuth(request: NextRequest): Promise<AuthResult> {
           };
         }
 
-        // 生产环境：验证JWT token
+        // 生产环境：验证token（支持JWT和Session两种格式）
         if (!token) {
           console.warn("生产环境：Token为空");
           return {
@@ -116,18 +127,35 @@ export async function requireAuth(request: NextRequest): Promise<AuthResult> {
           };
         }
 
-        console.log("生产环境：验证JWT token...");
-        const verifiedUser = await verifyToken(token);
+        console.log("生产环境：验证token...");
+        let verifiedUser = null;
+
+        // 首先尝试验证Session token（邮箱登录）
+        if (token.startsWith('session_')) {
+          console.log("尝试验证Session token...");
+          verifiedUser = await verifySessionToken(token);
+          if (verifiedUser) {
+            console.log(`✅ Session token验证成功，用户: ${verifiedUser.email || verifiedUser.id}`);
+          }
+        }
+
+        // 如果Session token验证失败，尝试JWT token（微信登录）
+        if (!verifiedUser) {
+          console.log("尝试验证JWT token...");
+          verifiedUser = await verifyToken(token);
+          if (verifiedUser) {
+            console.log(`✅ JWT token验证成功，用户: ${verifiedUser.email || verifiedUser.id}`);
+          }
+        }
 
         if (!verifiedUser) {
-          console.warn("生产环境：Token验证失败");
+          console.warn("生产环境：所有token验证失败");
           return {
             success: false,
             error: "无效的认证令牌"
           };
         }
 
-        console.log(`✅ Token验证成功，用户: ${verifiedUser.email || verifiedUser.id}`);
         return {
           success: true,
           user: {

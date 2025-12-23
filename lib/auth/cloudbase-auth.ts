@@ -10,6 +10,55 @@ export interface VerifiedUser {
 }
 
 /**
+ * 验证Session token（邮箱登录生成）
+ */
+export async function verifySessionToken(token: string): Promise<VerifiedUser | null> {
+  try {
+    // Session token格式: session_${userId}_${timestamp}
+    const parts = token.split('_');
+    if (parts.length !== 3 || parts[0] !== 'session') {
+      return null;
+    }
+
+    const userId = parts[1];
+    const timestamp = parseInt(parts[2]);
+
+    // 检查token是否过期（1小时）
+    const now = Date.now();
+    const expireTime = timestamp + 3600000; // 1小时
+    if (now > expireTime) {
+      console.warn('[Session] Token expired');
+      return null;
+    }
+
+    // 从数据库获取用户信息
+    const db = getCloudBaseDatabase();
+    const userResult = await db.collection(CloudBaseCollections.USERS)
+      .where({ _id: userId })
+      .get();
+
+    if (!userResult.data || userResult.data.length === 0) {
+      console.warn(`[Session] User not found: ${userId}`);
+      return null;
+    }
+
+    const user = userResult.data[0];
+
+    return {
+      id: user._id,
+      email: user.email || undefined,
+      name: user.name || undefined,
+      avatar: user.avatar || undefined,
+      subscription_plan: user.subscriptionTier === 'pro' ? 'pro' : 'free'
+    };
+
+  } catch (error) {
+    console.error('[Session] Token verification error:', error);
+    return null;
+  }
+}
+
+/**
  * 验证JWT token并返回用户信息
  */
 export async function verifyToken(token: string): Promise<VerifiedUser | null> {

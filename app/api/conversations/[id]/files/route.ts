@@ -55,7 +55,8 @@ export async function POST(
         const existingFile = await query("conversation_files", {
           where: {
             conversation_id: conversationId,
-            file_path: file.file_path
+            file_path: file.file_path,
+            user_id: user.id  // 确保只查询当前用户的文件
           },
           limit: 1
         })
@@ -77,6 +78,7 @@ export async function POST(
           // 添加新文件
           result = await add("conversation_files", {
             conversation_id: conversationId,
+            user_id: user.id,  // 确保文件关联到用户
             file_path: file.file_path,
             file_content: file.file_content,
             created_at: new Date().toISOString(),
@@ -85,6 +87,7 @@ export async function POST(
           savedFiles.push({
             _id: result.id,
             conversation_id: conversationId,
+            user_id: user.id,
             file_path: file.file_path,
             file_content: file.file_content,
             created_at: new Date().toISOString(),
