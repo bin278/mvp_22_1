@@ -46,3 +46,4 @@ async function testEnvAPI() {
 }
 
 testEnvAPI();
+

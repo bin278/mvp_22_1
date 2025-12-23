@@ -56,3 +56,4 @@ function checkForUndefinedValues() {
 
 simulateEnvEndpoint();
 checkForUndefinedValues();
+

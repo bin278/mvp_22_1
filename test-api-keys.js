@@ -28,3 +28,4 @@ if (allConfigured) {
   console.log('❌ Some API keys are missing or using placeholder values.');
   console.log('Please configure the missing API keys in your environment variables.');
 }
+
