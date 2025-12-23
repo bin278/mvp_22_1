@@ -14,13 +14,18 @@ export async function initializeCloudBase(): Promise<any> {
       const env = await getPublicEnv();
       const envId = env.NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID;
 
+      console.log('🔍 CloudBase初始化 - 环境变量检查:');
+      console.log('   NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID:', envId);
+      console.log('   NEXT_PUBLIC_APP_URL:', env.NEXT_PUBLIC_APP_URL);
+      console.log('   WECHAT_APP_ID:', env.WECHAT_APP_ID);
+
       if (!envId || envId === 'your-env-id' || envId === 'your_environment_id_here') {
-        console.error('❌ CloudBase环境ID未正确配置。请在腾讯云控制台设置 TENCENT_CLOUD_ENV_ID 环境变量。');
+        console.error('❌ CloudBase环境ID未正确配置。请在腾讯云控制台设置 NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID 环境变量。');
         console.error('📖 配置步骤：');
-        console.error('   1. 登录腾讯云控制台');
+        console.error('   1. 登录腾讯云控制台: https://console.cloud.tencent.com/tcb');
         console.error('   2. 进入 CloudBase 云托管服务');
-        console.error('   3. 在环境变量中添加 TENCENT_CLOUD_ENV_ID');
-        console.error('   4. 重启服务');
+        console.error('   3. 在环境变量中添加: NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID=cloud1-3gn61ziydcfe6a57');
+        console.error('   4. 保存并重新部署服务');
         console.error('📖 详细指南：查看 CLOUDBASE_CLOUD_HOSTING_DEPLOYMENT.md');
         return null;
       }
