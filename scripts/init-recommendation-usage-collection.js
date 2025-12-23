@@ -5,13 +5,43 @@
  * 在CloudBase中创建第一个记录来自动创建集合
  */
 
+const fs = require('fs');
+const path = require('path');
 const cloudbase = require('@cloudbase/node-sdk');
+
+// 读取环境变量
+function loadEnv() {
+  try {
+    const envPath = path.join(__dirname, '..', '.env.local');
+    if (fs.existsSync(envPath)) {
+      const envContent = fs.readFileSync(envPath, 'utf8');
+      const envVars = {};
+
+      envContent.split('\n').forEach(line => {
+        const [key, ...valueParts] = line.split('=');
+        if (key && valueParts.length > 0) {
+          const value = valueParts.join('=').trim();
+          if (value) {
+            envVars[key.trim()] = value.replace(/^["']|["']$/g, ''); // 移除引号
+          }
+        }
+      });
+
+      return envVars;
+    }
+  } catch (error) {
+    console.error('读取环境变量文件失败:', error);
+  }
+  return {};
+}
+
+const envVars = loadEnv();
 
 // 初始化CloudBase
 const app = cloudbase.init({
-  secretId: process.env.TENCENT_CLOUD_SECRET_ID,
-  secretKey: process.env.TENCENT_CLOUD_SECRET_KEY,
-  env: process.env.TENCENT_CLOUD_ENV_ID,
+  secretId: envVars.TENCENT_CLOUD_SECRET_ID || envVars.CLOUDBASE_SECRET_ID,
+  secretKey: envVars.TENCENT_CLOUD_SECRET_KEY || envVars.CLOUDBASE_SECRET_KEY,
+  env: envVars.TENCENT_CLOUD_ENV_ID || envVars.NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID,
 });
 
 async function initRecommendationUsageCollection() {
