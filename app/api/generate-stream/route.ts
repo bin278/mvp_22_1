@@ -186,9 +186,6 @@ code {
 
 // 清理重复的代码定义
 
-// 全局状态存储
-const generationStates = new Map<string, GenerationState>()
-
 // 风险评估函数
 function assessGenerationRisk(prompt: string, model: string): boolean {
   const complexity = prompt.length + (prompt.split(' ').length * 2)
