@@ -2,6 +2,27 @@ import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { AVAILABLE_MODELS, canUseModel, type SubscriptionTier } from '@/lib/subscription-tiers'
 import { requireAuth } from '@/lib/auth/auth'
+import { add } from '@/lib/database/cloudbase'
+
+// 保存消息到对话
+async function saveMessageToConversation(conversationId: string, role: 'user' | 'assistant', content: string, userId: string) {
+  try {
+    const messageData = {
+      conversation_id: conversationId,
+      user_id: userId,
+      role: role,
+      content: content,
+      message_type: 'code_generation',
+      created_at: new Date().toISOString()
+    }
+
+    await add('conversation_messages', messageData)
+    console.log(`💾 Message saved to conversation ${conversationId}`)
+  } catch (error) {
+    console.error('❌ Failed to save message to conversation:', error)
+    throw error
+  }
+}
 
 function formatCodeString(code: string): string {
   // Quick check: if code already has good formatting, return as-is
@@ -51,14 +72,28 @@ export async function POST(request: NextRequest) {
   console.log('🚀 Starting streaming code generation request')
 
   try {
-    // 临时简化认证逻辑，直接设置为 pro 等级以测试
-    console.log('🔐 Using simplified auth: tier = pro')
-    const userTier = 'pro'
+    // 进行用户认证
+    console.log('🔐 Authenticating user...')
+    const authResult = await requireAuth(request)
+    if (!authResult.success) {
+      console.log('❌ Authentication failed:', authResult.error)
+      return NextResponse.json(
+        { error: authResult.error || 'Authentication required' },
+        { status: 401 }
+      )
+    }
+
+    const user = authResult.user
+    console.log('✅ User authenticated:', user.email)
+
+    // 获取用户订阅等级
+    const userTier = user.subscription_plan === 'pro' ? 'pro' : 'free'
+    console.log('📊 User tier:', userTier)
 
     const body = await request.json()
-    const { prompt, model: requestedModel = 'deepseek-chat' } = body
+    const { prompt, model: requestedModel = 'deepseek-chat', conversationId } = body
 
-    console.log('📝 Request details:', { prompt, requestedModel })
+    console.log('📝 Request details:', { prompt, requestedModel, conversationId, userId: user.id })
 
     if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
       return NextResponse.json(
@@ -452,6 +487,18 @@ code {
                 }, null, 2)
               },
               projectName: 'streaming-app'
+            }
+          }
+
+          // 保存AI响应到对话（如果有conversationId）
+          if (conversationId) {
+            try {
+              console.log('💾 Saving AI response to conversation:', conversationId)
+              await saveMessageToConversation(conversationId, 'assistant', JSON.stringify(parsedResponse), user.id)
+              console.log('✅ AI response saved to conversation')
+            } catch (saveError) {
+              console.error('❌ Failed to save AI response to conversation:', saveError)
+              // 不影响代码生成，只记录错误
             }
           }
 

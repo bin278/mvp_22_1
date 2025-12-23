@@ -717,7 +717,8 @@ function GeneratePageContent() {
         },
         body: JSON.stringify({
           prompt: prompt.trim(),
-          model: selectedModel
+          model: selectedModel,
+          conversationId: currentConversationId
         }),
         signal: controller.signal,
       })
