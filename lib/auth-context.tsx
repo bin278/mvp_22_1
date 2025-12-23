@@ -10,6 +10,12 @@ import {
   signInWithWechat,
   setupAuthStateListener
 } from './cloudbase-auth-frontend'
+import {
+  initAuthStateManager,
+  getUser as getAuthUser,
+  isAuthenticated,
+  clearAuthState
+} from './auth/auth-state-manager'
 // CloudBase认证API调用函数
 async function apiCall(endpoint: string, data?: any) {
   const response = await fetch(`/api/auth/${endpoint}`, {
@@ -98,52 +104,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true
 
-    // CloudBase已在layout中初始化，这里不再重复初始化
+    // 初始化认证状态管理器
+    if (mounted) {
+      initAuthStateManager();
 
-      // CloudBase文档数据库模式下，从localStorage恢复认证状态
+      // 使用新的auth-state-manager恢复认证状态
       try {
+        const authUser = getAuthUser();
+        const isAuth = isAuthenticated();
+
+        if (authUser && isAuth) {
+          console.log('[Auth Context] 从localStorage恢复用户认证状态');
+          // 转换用户数据格式
+          const cloudBaseUser = {
+            uid: authUser.id,
+            email: authUser.email,
+            username: authUser.name || authUser.email,
+            name: authUser.name,
+            avatar: authUser.avatar
+          };
+
+          setUser(cloudBaseUser);
+          // 对于session，我们主要关注认证状态，具体token由auth-state-manager管理
+          setSession({
+            accessToken: 'managed-by-auth-state-manager',
+            refreshToken: 'managed-by-auth-state-manager',
+            accessTokenExpire: Date.now() + 3600000, // 1小时后
+            refreshTokenExpire: Date.now() + 604800000 // 7天后
+          });
+        } else {
+          setUser(null);
+          setSession(null);
+        }
+
+        setLoading(false);
+      } catch (error) {
+        console.error('[Auth Context] 初始化认证状态失败:', error);
         if (mounted) {
-          const savedUser = localStorage.getItem('cloudbase_user');
-          const savedSession = localStorage.getItem('cloudbase_session');
-
-          if (savedUser && savedSession) {
-            try {
-              const userData = JSON.parse(savedUser);
-              const sessionData = JSON.parse(savedSession);
-
-              // 检查session是否过期
-              const now = Date.now();
-              if (sessionData.accessTokenExpire > now) {
-                console.log('从localStorage恢复用户认证状态');
-                setUser(userData);
-                setSession(sessionData);
-              } else {
-                console.log('Session已过期，清除本地存储');
-                localStorage.removeItem('cloudbase_user');
-                localStorage.removeItem('cloudbase_session');
-                setUser(null);
-                setSession(null);
-              }
-            } catch (parseError) {
-              console.error('解析本地存储数据失败:', parseError);
-              localStorage.removeItem('cloudbase_user');
-              localStorage.removeItem('cloudbase_session');
-              setUser(null);
-              setSession(null);
-            }
-          } else {
-            setUser(null);
-            setSession(null);
-          }
-
+          setUser(null);
+          setSession(null);
           setLoading(false);
         }
-      } catch (error) {
-      console.error('CloudBase初始化失败:', error);
-      if (mounted) {
-        setUser(null);
-        setSession(null);
-        setLoading(false);
       }
     }
 
@@ -155,11 +156,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    // 监听auth-state-manager的变化
+    const handleAuthStateChanged = () => {
+      if (!mounted) return;
+
+      const authUser = getAuthUser();
+      const isAuth = isAuthenticated();
+
+      if (authUser && isAuth) {
+        console.log('[Auth Context] 认证状态更新：用户已登录');
+        // 转换用户数据格式
+        const cloudBaseUser = {
+          uid: authUser.id,
+          email: authUser.email,
+          username: authUser.name || authUser.email,
+          name: authUser.name,
+          avatar: authUser.avatar
+        };
+
+        setUser(cloudBaseUser);
+        setSession({
+          accessToken: 'managed-by-auth-state-manager',
+          refreshToken: 'managed-by-auth-state-manager',
+          accessTokenExpire: Date.now() + 3600000, // 1小时后
+          refreshTokenExpire: Date.now() + 604800000 // 7天后
+        });
+      } else {
+        console.log('[Auth Context] 认证状态更新：用户未登录');
+        setUser(null);
+        setSession(null);
+      }
+      setLoading(false);
+    };
+
+    // 添加事件监听器
+    window.addEventListener('auth-state-changed', handleAuthStateChanged);
+
     return () => {
       mounted = false;
       if (unsubscribe) {
         unsubscribe();
       }
+      window.removeEventListener('auth-state-changed', handleAuthStateChanged);
     }
   }, [])
 
@@ -206,14 +244,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       setSession(null);
 
-      // 清除localStorage中的认证状态
-      try {
-        localStorage.removeItem('cloudbase_user');
-        localStorage.removeItem('cloudbase_session');
-        console.log('用户认证状态已从localStorage清除');
-      } catch (storageError) {
-        console.error('清除localStorage认证状态失败:', storageError);
-      }
+      // 使用新的认证状态管理器清除所有认证状态
+      clearAuthState();
+      console.log('用户认证状态已清除');
     }
   }
 
