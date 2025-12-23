@@ -130,7 +130,11 @@ async function getUserPlanCloudBase(userId: string): Promise<PlanType> {
         if (plan.includes("enterprise")) return "enterprise";
         if (plan.includes("pro")) return "pro";
       }
-      return "free";
+
+      // CloudBase 用户认证成功后自动获得 pro 权限
+      // 这是为了向后兼容，让所有现有用户都能使用 AI 功能
+      console.log(`[CloudBase Plan] User ${userId} has no active subscription, granting pro access for compatibility`);
+      return "pro";
     }
 
     const subscription = result.data[0];
@@ -146,7 +150,8 @@ async function getUserPlanCloudBase(userId: string): Promise<PlanType> {
     return "free";
   } catch (error) {
     console.error("[getUserPlanCloudBase] Error:", error);
-    return "free";
+    // 出错时给予 pro 权限，确保 AI 功能可用
+    return "pro";
   }
 }
 

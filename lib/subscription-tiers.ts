@@ -89,7 +89,11 @@ export function canUseModel(tier: SubscriptionTier, modelId: string): boolean {
 /**
  * 获取默认模型
  */
-export function getDefaultModel(): string {
+export function getDefaultModel(tier?: SubscriptionTier): string {
+  if (tier && SUBSCRIPTION_TIERS[tier]) {
+    const tierModels = SUBSCRIPTION_TIERS[tier].models;
+    return tierModels[0] || 'deepseek-chat';
+  }
   return 'deepseek-chat';
 }
 

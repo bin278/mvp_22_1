@@ -17,7 +17,7 @@ import type { GeneratedProject } from "@/lib/code-generator"
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
 import { ConversationSidebar } from "@/components/conversation-sidebar"
 import { ModelSelector } from "@/components/model-selector"
-import { SUBSCRIPTION_TIERS, getDefaultModel, AVAILABLE_MODELS, type SubscriptionTier } from "@/lib/subscription-tiers"
+import { SUBSCRIPTION_TIERS, getDefaultModel, AVAILABLE_MODELS, canUseModel, type SubscriptionTier } from "@/lib/subscription-tiers"
 
 interface Message {
   id: string
@@ -108,18 +108,57 @@ function GeneratePageContent() {
 
         // 获取保存的模型选择
         const savedModel = localStorage.getItem('selectedModel')
-        if (savedModel && AVAILABLE_MODELS[savedModel]) {
+        if (savedModel && savedModel in AVAILABLE_MODELS) {
           setSelectedModel(savedModel)
         }
 
-        // TODO: 从后端API获取用户的实际订阅等级
-        // 暂时设置为免费版
-        setUserSubscriptionTier('free')
+        // 从后端API获取用户的实际订阅等级
+        fetchUserSubscriptionTier()
       } catch (error) {
         console.error('Error reading from localStorage:', error)
       }
     }
   }, [])
+
+  // 获取用户订阅等级
+  const fetchUserSubscriptionTier = async () => {
+    try {
+      if (authSession?.accessToken) {
+        console.log('🔍 Fetching user subscription tier...');
+        const response = await fetch('/api/subscription/status', {
+          headers: {
+            'Authorization': `Bearer ${authSession.accessToken}`,
+          },
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          console.log('📊 Subscription status response:', data);
+          if (data.success && data.subscription?.planType) {
+            const serverTier = data.subscription.planType;
+            console.log(`👤 User tier updated: ${userSubscriptionTier} -> ${serverTier}`);
+            setUserSubscriptionTier(serverTier)
+            // 如果当前选择的模型不适用于新等级，则切换到默认模型
+            if (!canUseModel(serverTier, selectedModel)) {
+              const newModel = getDefaultModel(serverTier);
+              console.log(`🔄 Model switched due to tier change: ${selectedModel} -> ${newModel}`);
+              setSelectedModel(newModel)
+            }
+          } else {
+            console.log('⚠️ Invalid subscription response format:', data);
+          }
+        } else {
+          console.log('❌ Failed to fetch subscription status:', response.status);
+        }
+      } else {
+        console.log('⚠️ No auth token available for subscription check');
+      }
+    } catch (error) {
+      console.error('Failed to fetch user subscription tier:', error)
+      // 出错时保持默认的free等级
+    }
+  }
+
 
   const handleLanguageChange = (newLanguage: "en" | "zh") => {
     setLanguage(newLanguage)
@@ -213,7 +252,20 @@ function GeneratePageContent() {
   const [isPrivateRepo, setIsPrivateRepo] = useState(false)
   const [isPushing, setIsPushing] = useState(false)
   const [pushError, setPushError] = useState<string | null>(null)
-  
+
+  // 当用户登录状态改变时，获取订阅等级
+  useEffect(() => {
+    if (authSession?.accessToken) {
+      fetchUserSubscriptionTier()
+    } else {
+      setUserSubscriptionTier('free')
+      // 未登录时，如果当前模型不适用于free等级，则切换
+      if (!canUseModel('free', selectedModel)) {
+        setSelectedModel(getDefaultModel('free'))
+      }
+    }
+  }, [authSession?.accessToken])
+
   // Conversation management
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
@@ -613,7 +665,24 @@ function GeneratePageContent() {
     }
 
     try {
-      // 先使用调试API检查请求
+      // 先使用测试API检查连接
+      console.log('🧪 Testing API connectivity...')
+      const testResponse = await fetch('/api/test-generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ test: 'hello' })
+      })
+
+      if (!testResponse.ok) {
+        throw new Error(`API connectivity test failed: ${testResponse.status}`)
+      }
+
+      const testResult = await testResponse.json()
+      console.log('✅ API connectivity test passed:', testResult)
+
+      // 然后使用调试API检查请求
       console.log('🔍 Sending debug request first...')
       const debugResponse = await fetch('/api/debug-generate', {
         method: 'POST',
@@ -633,11 +702,18 @@ function GeneratePageContent() {
         throw new Error(`Validation failed: ${debugResult.error}`)
       }
 
+      console.log('🚀 Sending generate request:', {
+        prompt: prompt.trim(),
+        model: selectedModel,
+        userTier: userSubscriptionTier,
+        hasAuth: !!authSession?.accessToken
+      });
+
       const response = await fetch('/api/generate-stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authSession.accessToken}`,
+          'Authorization': `Bearer ${authSession?.accessToken || ''}`,
         },
         body: JSON.stringify({
           prompt: prompt.trim(),
@@ -647,7 +723,18 @@ function GeneratePageContent() {
       })
 
       if (!response.ok) {
-        throw new Error('Failed to generate code')
+        // Try to parse error response
+        try {
+          const errorData = await response.json()
+          const errorMessage = errorData.error || 'Failed to generate code'
+          const error = new Error(errorMessage)
+          ;(error as any).details = errorData.details || errorMessage
+          ;(error as any).statusCode = response.status
+          throw error
+        } catch (parseError) {
+          // If we can't parse the error response, use a generic message
+          throw new Error(`Failed to generate code (${response.status})`)
+        }
       }
 
       const reader = response.body?.getReader()

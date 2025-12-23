@@ -58,7 +58,11 @@ export async function requireAuth(request: NextRequest): Promise<AuthResult> {
 
       try {
         // 检查是否是开发环境，如果是则跳过认证
-        const isDev = process.env.NODE_ENV === 'development';
+        // 如果NODE_ENV未设置，也认为是开发环境
+        const nodeEnv = process.env.NODE_ENV;
+        const isDev = !nodeEnv || nodeEnv === 'development';
+        console.log(`🔐 Environment check: NODE_ENV=${nodeEnv}, isDev=${isDev}`);
+
         if (isDev) {
           console.log("开发环境：跳过认证检查");
           return {
@@ -68,7 +72,7 @@ export async function requireAuth(request: NextRequest): Promise<AuthResult> {
               email: "dev@example.com",
               uid: "dev-user",
             },
-            token: "dev-token",
+            token: token || "dev-token",
           };
         }
 

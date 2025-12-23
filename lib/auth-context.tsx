@@ -101,43 +101,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // CloudBase已在layout中初始化，这里不再重复初始化
 
       // CloudBase文档数据库模式下，从localStorage恢复认证状态
-      if (mounted) {
-        const savedUser = localStorage.getItem('cloudbase_user');
-        const savedSession = localStorage.getItem('cloudbase_session');
+      try {
+        if (mounted) {
+          const savedUser = localStorage.getItem('cloudbase_user');
+          const savedSession = localStorage.getItem('cloudbase_session');
 
-        if (savedUser && savedSession) {
-          try {
-            const userData = JSON.parse(savedUser);
-            const sessionData = JSON.parse(savedSession);
+          if (savedUser && savedSession) {
+            try {
+              const userData = JSON.parse(savedUser);
+              const sessionData = JSON.parse(savedSession);
 
-            // 检查session是否过期
-            const now = Date.now();
-            if (sessionData.accessTokenExpire > now) {
-              console.log('从localStorage恢复用户认证状态');
-              setUser(userData);
-              setSession(sessionData);
-            } else {
-              console.log('Session已过期，清除本地存储');
+              // 检查session是否过期
+              const now = Date.now();
+              if (sessionData.accessTokenExpire > now) {
+                console.log('从localStorage恢复用户认证状态');
+                setUser(userData);
+                setSession(sessionData);
+              } else {
+                console.log('Session已过期，清除本地存储');
+                localStorage.removeItem('cloudbase_user');
+                localStorage.removeItem('cloudbase_session');
+                setUser(null);
+                setSession(null);
+              }
+            } catch (parseError) {
+              console.error('解析本地存储数据失败:', parseError);
               localStorage.removeItem('cloudbase_user');
               localStorage.removeItem('cloudbase_session');
               setUser(null);
               setSession(null);
             }
-          } catch (parseError) {
-            console.error('解析本地存储数据失败:', parseError);
-            localStorage.removeItem('cloudbase_user');
-            localStorage.removeItem('cloudbase_session');
+          } else {
             setUser(null);
             setSession(null);
           }
-        } else {
-          setUser(null);
-          setSession(null);
-        }
 
-        setLoading(false);
-      }
-    } catch (error) {
+          setLoading(false);
+        }
+      } catch (error) {
       console.error('CloudBase初始化失败:', error);
       if (mounted) {
         setUser(null);
