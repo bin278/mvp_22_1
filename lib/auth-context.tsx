@@ -98,9 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true
 
-    // 初始化CloudBase前端SDK（同步操作）
-    try {
-      initializeCloudBase();
+    // CloudBase已在layout中初始化，这里不再重复初始化
 
       // CloudBase文档数据库模式下，从localStorage恢复认证状态
       if (mounted) {
