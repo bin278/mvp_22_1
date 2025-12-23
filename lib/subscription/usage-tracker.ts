@@ -263,12 +263,23 @@ async function getUserUsageStatsCloudBase(userId: string): Promise<UsageStats> {
         created_at: _.gte(start.toISOString()).and(_.lte(end.toISOString())),
       })
       .count();
-    
+
     currentPeriodUsage = result.total || 0;
-  } catch (error) {
+  } catch (error: any) {
     console.error("[getUserUsageStatsCloudBase] Error counting usage:", error);
-    // 如果集合不存在，返回 0
-    currentPeriodUsage = 0;
+
+    // 检查是否是集合不存在的错误
+    const isCollectionNotExist = error?.code === 'DATABASE_COLLECTION_NOT_EXIST' ||
+                                error?.message?.includes('Db or Table not exist') ||
+                                error?.message?.includes('ResourceNotFound');
+
+    if (isCollectionNotExist) {
+      console.log("[getUserUsageStatsCloudBase] Collection 'recommendation_usage' does not exist, returning 0");
+      currentPeriodUsage = 0;
+    } else {
+      // 其他错误重新抛出
+      throw error;
+    }
   }
 
   return {
