@@ -6,3 +6,4 @@ console.log('WECHAT_APP_SECRET:', process.env.WECHAT_APP_SECRET ? '已设置' : 
 console.log('=== 检查完成 ===');
 
 
+
