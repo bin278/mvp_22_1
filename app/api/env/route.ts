@@ -28,7 +28,9 @@ export async function GET() {
       has_TENCENT_ENV_ID: !!publicEnv.NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID,
       has_WECHAT_APP_ID: !!publicEnv.NEXT_PUBLIC_WECHAT_APP_ID,
       DEPLOYMENT_REGION: publicEnv.DEPLOYMENT_REGION,
-      NODE_ENV: publicEnv.NODE_ENV
+      NODE_ENV: publicEnv.NODE_ENV,
+      appUrlValue: publicEnv.NEXT_PUBLIC_APP_URL || '未设置',
+      wechatAppIdValue: publicEnv.NEXT_PUBLIC_WECHAT_APP_ID || '未设置'
     });
 
     const response = {

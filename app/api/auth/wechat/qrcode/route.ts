@@ -46,12 +46,21 @@ export async function GET(request: NextRequest) {
     const qrcodeUrl = `https://open.weixin.qq.com/connect/qrconnect?appid=${appId}&redirect_uri=${redirectUri}&response_type=code&scope=snsapi_login&state=${encodeURIComponent(state)}#wechat_redirect`;
 
     console.log(`[WeChat QRCode] Generated QRCode URL for next: ${next}`);
+    console.log(`[WeChat QRCode] Base URL: ${baseUrl}`);
+    console.log(`[WeChat QRCode] Redirect URI: ${decodeURIComponent(redirectUri)}`);
 
     return NextResponse.json({
       supported: true,
       qrcodeUrl,
       redirectUri: decodeURIComponent(redirectUri),
-      state
+      state,
+      config: {
+        environment: process.env.NODE_ENV || 'development',
+        baseUrl: normalizedBaseUrl,
+        redirectUri: decodeURIComponent(redirectUri),
+        appId: appId ? 'configured' : 'missing',
+        appSecret: appSecret ? 'configured' : 'missing'
+      }
     });
 
   } catch (error) {
