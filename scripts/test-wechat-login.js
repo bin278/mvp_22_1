@@ -173,9 +173,9 @@ async function runTests() {
     console.log('2. 进入云托管 → 环境变量');
     console.log('3. 设置以下变量：');
     console.log('   - NEXT_PUBLIC_APP_URL=https://mornfront.mornscience.top');
+    console.log('   - NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID=cloud1-3gn61ziydcfe6a57');
     console.log('   - WECHAT_APP_ID=你的微信应用ID');
     console.log('   - WECHAT_APP_SECRET=你的微信应用密钥');
-    console.log('   - NEXT_PUBLIC_WECHAT_APP_ID=你的微信应用ID');
     console.log('4. 保存并重新部署');
   }
   console.log('================================\n');
