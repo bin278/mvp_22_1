@@ -286,32 +286,58 @@ export default App;`
           let streamedChars = 0
           let accumulatedContent = ''
 
-          // Process streaming chunks in real-time - true real-time streaming like Google
-          // DeepSeek generates → we immediately forward → frontend immediately displays
+          // 优化1: 添加心跳机制，防止代理中断连接
+          const heartbeatInterval = setInterval(() => {
+            try {
+              safeEnqueue(`data: ${JSON.stringify({ type: 'heartbeat', timestamp: Date.now() })}\n\n`)
+            } catch (error) {
+              console.error('Failed to send heartbeat:', error)
+            }
+          }, 10000) // 每10秒发送心跳
+
+          let charBuffer = ''
+          const BATCH_SIZE = 5 // 减少批量大小，提高响应性
+
+          // Process streaming chunks in real-time - optimized for production
           for await (const chunk of completion) {
             const content = chunk.choices[0]?.delta?.content
             if (content) {
               accumulatedContent += content
 
-              // Stream content character by character with visible delay for typewriter effect
+              // 优化2: 批量发送字符，减少网络往返
               for (const char of content) {
+                charBuffer += char
                 streamedChars++
 
-                const charData = {
-                  type: 'char',
-                  char: char,
-                  totalLength: streamedChars
-                }
-                
-                // Send each character immediately
-                safeEnqueue(`data: ${JSON.stringify(charData)}\n\n`)
+                if (charBuffer.length >= BATCH_SIZE) {
+                  const batchData = {
+                    type: 'chars',
+                    chars: charBuffer,
+                    totalLength: streamedChars
+                  }
 
-                // Small delay for visible typewriter effect (adjust this for speed)
-                // 20ms = fast typing, 50ms = normal typing, 100ms = slow typing
-                await new Promise(resolve => setTimeout(resolve, 20))
+                  safeEnqueue(`data: ${JSON.stringify(batchData)}\n\n`)
+                  charBuffer = ''
+
+                  // 优化3: 大幅减少延迟，从20ms改为2ms
+                  await new Promise(resolve => setTimeout(resolve, 2))
+                }
               }
             }
           }
+
+          // 发送剩余的字符缓冲区
+          if (charBuffer.length > 0) {
+            const finalBatchData = {
+              type: 'chars',
+              chars: charBuffer,
+              totalLength: streamedChars
+            }
+            safeEnqueue(`data: ${JSON.stringify(finalBatchData)}\n\n`)
+          }
+
+          // 清理心跳定时器
+          clearInterval(heartbeatInterval)
 
           console.log('AI streaming completed, total characters streamed:', streamedChars)
 

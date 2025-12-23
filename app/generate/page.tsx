@@ -804,10 +804,47 @@ function GeneratePageContent() {
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
       let streamingCodeBuffer = ''
+      let lastDataTime = Date.now()
+      let reconnectAttempts = 0
+      const MAX_RECONNECT = 3
+      const CONNECTION_TIMEOUT = 30000 // 30秒无数据视为连接断开
 
       if (!reader) {
         throw new Error('No response body reader available')
       }
+
+      // 连接检测定时器 - 防止生产环境连接中断
+      const connectionCheckInterval = setInterval(() => {
+        const timeSinceLastData = Date.now() - lastDataTime
+        if (timeSinceLastData > CONNECTION_TIMEOUT) {
+          console.warn(`⚠️ 生产环境连接检测: ${Math.round(timeSinceLastData/1000)}秒无数据，可能是网络代理中断`)
+
+          if (reconnectAttempts < MAX_RECONNECT) {
+            reconnectAttempts++
+            console.log(`🔄 生产环境自动重连 (${reconnectAttempts}/${MAX_RECONNECT})`)
+
+            // 取消当前流式请求
+            controller.abort()
+            clearInterval(connectionCheckInterval)
+
+            // 显示重连提示
+            setError(`网络连接不稳定，正在重连 (${reconnectAttempts}/${MAX_RECONNECT})...`)
+
+            // 短暂延迟后重试
+            setTimeout(() => {
+              console.log('🔄 重新启动流式生成...')
+              setError(null) // 清除错误提示
+              handleGenerate() // 递归调用自己重试
+            }, 2000)
+          } else {
+            console.error('❌ 生产环境重连失败次数过多')
+            setError('网络连接失败，请检查网络后重试')
+            setIsStreaming(false)
+            setIsGenerating(false)
+            clearInterval(connectionCheckInterval)
+          }
+        }
+      }, 5000) // 每5秒检查一次连接
 
       while (true) {
         const { done, value } = await reader.read()
@@ -830,18 +867,36 @@ function GeneratePageContent() {
             try {
               const parsedData = JSON.parse(data)
 
-              if (parsedData.type === 'char') {
-                // Stream character by character for typewriter effect
+              if (parsedData.type === 'chars') {
+                // 优化: 批量处理字符，更高效
+                streamingCodeBuffer += parsedData.chars
+                setStreamingCode(streamingCodeBuffer)
+
+                // 更新最后数据时间（用于连接检测）
+                lastDataTime = Date.now()
+              } else if (parsedData.type === 'char') {
+                // 兼容旧的单字符模式
                 streamingCodeBuffer += parsedData.char
                 setStreamingCode(streamingCodeBuffer)
 
-                // Auto-scroll to bottom
+                // 更新最后数据时间
+                lastDataTime = Date.now()
+              } else if (parsedData.type === 'heartbeat') {
+                // 收到心跳包，更新连接状态
+                lastDataTime = Date.now()
+                console.log('❤️ 收到心跳包，连接正常')
+                continue
+              }
+
+              // Auto-scroll to bottom (只在有实际内容时滚动)
+              if (parsedData.type === 'chars' || parsedData.type === 'char') {
                 setTimeout(() => {
                   const codeContainer = document.querySelector('.overflow-auto')
                   if (codeContainer) {
                     codeContainer.scrollTop = codeContainer.scrollHeight
                   }
                 }, 0)
+              }
 
               } else if (parsedData.type === 'complete') {
                 // Final project data received
@@ -934,7 +989,14 @@ function GeneratePageContent() {
           }
         }
       }
+
+      // 清理连接检测定时器
+      clearInterval(connectionCheckInterval)
+
     } catch (error: any) {
+      // 清理连接检测定时器（防止内存泄漏）
+      clearInterval(connectionCheckInterval)
+
       if (error.name === 'AbortError') {
         console.log('Generation cancelled by user')
         return

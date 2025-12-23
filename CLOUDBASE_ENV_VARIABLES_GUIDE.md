@@ -19,8 +19,9 @@ NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID=your-env-id
 WECHAT_APP_ID=your_wechat_app_id
 WECHAT_APP_SECRET=your_wechat_app_secret
 
-# JWT配置
-JWT_SECRET=your_jwt_secret_key
+# JWT配置 (微信登录必需)
+# 生成方法: node scripts/generate-jwt-secret.js
+JWT_SECRET=your_jwt_secret_key_at_least_32_characters
 
 # 支付配置
 WECHAT_PAY_APPID=your_wechat_pay_appid
