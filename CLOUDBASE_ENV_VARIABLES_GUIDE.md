@@ -18,7 +18,6 @@ NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID=your-env-id
 # 微信登录配置
 WECHAT_APP_ID=your_wechat_app_id
 WECHAT_APP_SECRET=your_wechat_app_secret
-NEXT_PUBLIC_WECHAT_APP_ID=your_wechat_app_id
 
 # JWT配置
 JWT_SECRET=your_jwt_secret_key
@@ -39,7 +38,7 @@ GLM_API_KEY=your_glm_key
 // 不要在客户端组件中直接使用process.env
 function MyComponent() {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL; // ❌ 无法获取
-  const wechatAppId = process.env.NEXT_PUBLIC_WECHAT_APP_ID; // ❌ 无法获取
+  const wechatAppId = process.env.WECHAT_APP_ID; // ❌ 无法获取
 }
 ```
 
@@ -56,7 +55,7 @@ function MyComponent() {
   return (
     <div>
       <p>应用地址: {env.NEXT_PUBLIC_APP_URL}</p>
-      <p>微信AppID: {env.NEXT_PUBLIC_WECHAT_APP_ID}</p>
+      <p>微信AppID: {env.WECHAT_APP_ID}</p>
       <p>部署区域: {env.DEPLOYMENT_REGION}</p>
     </div>
   );
@@ -76,7 +75,7 @@ function MyComponent() {
   "env": {
     "NEXT_PUBLIC_APP_URL": "https://your-domain.com",
     "NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID": "your-env-id",
-    "NEXT_PUBLIC_WECHAT_APP_ID": "wx1234567890",
+    "WECHAT_APP_ID": "wxdcd6dda48f3245e1",
     "DEPLOYMENT_REGION": "cn",
     "NODE_ENV": "production"
   },
@@ -161,7 +160,7 @@ function MyComponent() {
   }
 
   // 正常渲染
-  return <div>App URL: {env.NEXT_PUBLIC_APP_URL}</div>;
+  return <div>App URL: {env.NEXT_PUBLIC_APP_URL}, WeChat ID: {env.WECHAT_APP_ID}</div>;
 }
 ```
 
@@ -175,7 +174,7 @@ export default function ServerComponent() {
   // 服务端可以直接访问process.env
   const env = getPublicEnvSync();
 
-  return <div>App URL: {env.NEXT_PUBLIC_APP_URL}</div>;
+  return <div>App URL: {env.NEXT_PUBLIC_APP_URL}, WeChat ID: {env.WECHAT_APP_ID}</div>;
 }
 ```
 

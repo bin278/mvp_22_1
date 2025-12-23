@@ -169,7 +169,7 @@ export const signInWithWechat = async () => {
       const response = await fetch('/api/env');
       if (response.ok) {
         const data = await response.json();
-        appId = data.env?.NEXT_PUBLIC_WECHAT_APP_ID || appId;
+        appId = data.env?.WECHAT_APP_ID || appId;
       }
     } catch (error) {
       console.warn('Failed to fetch WECHAT_APP_ID from API, using default:', error);

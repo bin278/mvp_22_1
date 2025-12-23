@@ -16,7 +16,7 @@ import { getPublicEnv, PublicEnv } from '@/lib/env-client'
  *   return (
  *     <div>
  *       <p>App URL: {env.NEXT_PUBLIC_APP_URL}</p>
- *       <p>WeChat App ID: {env.NEXT_PUBLIC_WECHAT_APP_ID}</p>
+ *       <p>WeChat App ID: {env.WECHAT_APP_ID}</p>
  *       <p>Region: {env.DEPLOYMENT_REGION}</p>
  *     </div>
  *   )

@@ -13,7 +13,7 @@ export async function GET() {
       // 应用配置
       NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
       NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID: process.env.NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID,
-      NEXT_PUBLIC_WECHAT_APP_ID: process.env.WECHAT_APP_ID, // 微信登录需要的前端变量
+      WECHAT_APP_ID: process.env.WECHAT_APP_ID, // 微信登录需要的前端变量
 
       // 部署环境信息
       DEPLOYMENT_REGION: process.env.DEPLOYMENT_REGION || 'cn',
@@ -26,11 +26,11 @@ export async function GET() {
     console.log('[Env API] 环境变量读取完成:', {
       has_APP_URL: !!publicEnv.NEXT_PUBLIC_APP_URL,
       has_TENCENT_ENV_ID: !!publicEnv.NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID,
-      has_WECHAT_APP_ID: !!publicEnv.NEXT_PUBLIC_WECHAT_APP_ID,
+      has_WECHAT_APP_ID: !!publicEnv.WECHAT_APP_ID,
       DEPLOYMENT_REGION: publicEnv.DEPLOYMENT_REGION,
       NODE_ENV: publicEnv.NODE_ENV,
       appUrlValue: publicEnv.NEXT_PUBLIC_APP_URL || '未设置',
-      wechatAppIdValue: publicEnv.NEXT_PUBLIC_WECHAT_APP_ID || '未设置'
+      wechatAppIdValue: publicEnv.WECHAT_APP_ID || '未设置'
     });
 
     const response = {

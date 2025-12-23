@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
       wechat: {
         WECHAT_APP_ID: process.env.WECHAT_APP_ID ? '已设置' : null,
         WECHAT_APP_SECRET: process.env.WECHAT_APP_SECRET ? '已设置' : null,
-        NEXT_PUBLIC_WECHAT_APP_ID: process.env.NEXT_PUBLIC_WECHAT_APP_ID || null
+        NEXT_PUBLIC_WECHAT_APP_ID: process.env.WECHAT_APP_ID || null // 统一使用WECHAT_APP_ID
       },
 
       // 配置状态

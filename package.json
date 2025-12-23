@@ -24,6 +24,7 @@
     "cloudbase:check": "node check-cloudbase-config.js",
     "cloudbase:check-deploy": "node scripts/check-cloudbase-deployment.js",
     "wechat:check": "node scripts/check-wechat-config.js",
+    "wechat:test": "node scripts/test-wechat-login.js",
     "wechat:check-prod": "echo '在生产环境浏览器控制台运行: fetch(\"/api/wechat/config\").then(r=>r.json()).then(d=>console.log(JSON.stringify(d,null,2)))'",
     "env:check": "node check-env-content.js",
     "env:validate": "node check-env.js",
