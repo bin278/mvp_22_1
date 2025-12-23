@@ -754,36 +754,6 @@ export default App;`
                   await new Promise(resolve => setTimeout(resolve, 2))
                 }
               }
-
-                // 通知前端切换模式
-                safeEnqueue(`data: ${JSON.stringify({
-                  type: 'mode_switch',
-                  mode: 'async',
-                  taskId: generationState.taskId,
-                  reason: 'generation_timeout_risk'
-                })}\n\n`)
-
-                // 启动异步后备处理
-                const asyncTaskId = await startAsyncFallback(
-                  generationState.taskId,
-                  prompt,
-                  model,
-                  user,
-                  accumulatedContent,
-                  conversationId
-                )
-
-                if (asyncTaskId) {
-                  // 更新前端的异步任务ID
-                  safeEnqueue(`data: ${JSON.stringify({
-                    type: 'async_task_ready',
-                    asyncTaskId: asyncTaskId
-                  })}\n\n`)
-                }
-
-                // 停止流式处理
-                break
-              }
             }
           }
 
