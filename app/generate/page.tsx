@@ -896,8 +896,6 @@ function GeneratePageContent() {
                     codeContainer.scrollTop = codeContainer.scrollHeight
                   }
                 }, 0)
-              }
-
               } else if (parsedData.type === 'complete') {
                 // Final project data received
                 const project = parsedData.project
