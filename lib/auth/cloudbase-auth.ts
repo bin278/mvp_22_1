@@ -121,6 +121,10 @@ export async function cloudbaseSignInWithWechat(params: {
     // 2. 生成 JWT Token
     const jwtSecret = process.env.JWT_SECRET || 'fallback-secret-key';
 
+    // 定义过期时间（秒）
+    const accessTokenExpiresIn = user.pro ? 90 * 24 * 60 * 60 : 60 * 60; // Pro: 90天, 普通: 1小时
+    const refreshTokenExpiresIn = 7 * 24 * 60 * 60; // 7天
+
     const accessToken = jwt.sign(
       {
         userId: user._id,
@@ -130,7 +134,7 @@ export async function cloudbaseSignInWithWechat(params: {
         type: 'access'
       },
       jwtSecret,
-      { expiresIn: user.pro ? '90d' : '1h' } // Pro 用户 90 天，普通用户 1 小时
+      { expiresIn: accessTokenExpiresIn }
     );
 
     const refreshToken = jwt.sign(
@@ -140,10 +144,12 @@ export async function cloudbaseSignInWithWechat(params: {
         region: 'CN'
       },
       jwtSecret,
-      { expiresIn: '7d' } // 7 天
+      { expiresIn: refreshTokenExpiresIn }
     );
 
     console.log(`[CloudBase Auth] Generated tokens for user: ${user.email}`);
+    console.log(`[CloudBase Auth] Access token expires in: ${accessTokenExpiresIn}s (${user.pro ? '90 days' : '1 hour'})`);
+    console.log(`[CloudBase Auth] Refresh token expires in: ${refreshTokenExpiresIn}s (7 days)`);
 
     return {
       success: true,
@@ -151,8 +157,8 @@ export async function cloudbaseSignInWithWechat(params: {
       accessToken,
       refreshToken,
       tokenMeta: {
-        accessTokenExpiresIn: user.pro ? 90 * 24 * 60 * 60 : 60 * 60,
-        refreshTokenExpiresIn: 7 * 24 * 60 * 60,
+        accessTokenExpiresIn,
+        refreshTokenExpiresIn,
       },
     };
 
