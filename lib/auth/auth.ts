@@ -53,7 +53,7 @@ export async function requireAuth(request: NextRequest): Promise<AuthResult> {
     const authProvider = getAuthProvider();
 
     if (authProvider === 'cloudbase') {
-      // CloudBase认证：使用数据库验证用户session
+      // CloudBase认证：验证JWT token
       console.log("🔐 CloudBase认证服务已初始化");
 
       try {
@@ -64,7 +64,38 @@ export async function requireAuth(request: NextRequest): Promise<AuthResult> {
         console.log(`🔐 Environment check: NODE_ENV=${nodeEnv}, isDev=${isDev}`);
 
         if (isDev) {
-          console.log("开发环境：跳过认证检查");
+          console.log("开发环境：模拟用户认证");
+
+          // 开发环境：尝试验证JWT token，如果失败则使用默认用户
+          if (token && token !== "dev-token") {
+            try {
+              console.log("开发环境：尝试验证JWT token...");
+              const verifiedUser = await verifyToken(token);
+
+              if (verifiedUser) {
+                console.log(`✅ 开发环境JWT验证成功，用户: ${verifiedUser.email || verifiedUser.id}`);
+                return {
+                  success: true,
+                  user: {
+                    id: verifiedUser.id,
+                    email: verifiedUser.email,
+                    uid: verifiedUser.id,
+                    name: verifiedUser.name,
+                    avatar: verifiedUser.avatar,
+                    subscription_plan: verifiedUser.subscription_plan,
+                  },
+                  token: token,
+                };
+              } else {
+                console.log("开发环境：JWT验证失败，使用默认用户");
+              }
+            } catch (error) {
+              console.log("开发环境：JWT验证异常，使用默认用户:", error.message);
+            }
+          }
+
+          // JWT验证失败或无token，使用默认开发用户
+          console.log("开发环境：使用默认用户");
           return {
             success: true,
             user: {
@@ -76,24 +107,38 @@ export async function requireAuth(request: NextRequest): Promise<AuthResult> {
           };
         }
 
-        // 生产环境：简单的token存在性检查
-        // CloudBase的accessToken通常是一个字符串
-        if (token && token.length > 10) {
-          console.log("生产环境：Token有效");
+        // 生产环境：验证JWT token
+        if (!token) {
+          console.warn("生产环境：Token为空");
           return {
-            success: true,
-            user: {
-              id: "cloudbase-user",
-              uid: "cloudbase-user",
-              email: "user@cloudbase.com",
-            },
-            token: token,
+            success: false,
+            error: "认证令牌缺失"
           };
         }
 
+        console.log("生产环境：验证JWT token...");
+        const verifiedUser = await verifyToken(token);
+
+        if (!verifiedUser) {
+          console.warn("生产环境：Token验证失败");
+          return {
+            success: false,
+            error: "无效的认证令牌"
+          };
+        }
+
+        console.log(`✅ Token验证成功，用户: ${verifiedUser.email || verifiedUser.id}`);
         return {
-          success: false,
-          error: "无效的会话令牌"
+          success: true,
+          user: {
+            id: verifiedUser.id,
+            email: verifiedUser.email,
+            uid: verifiedUser.id,
+            name: verifiedUser.name,
+            avatar: verifiedUser.avatar,
+            subscription_plan: verifiedUser.subscription_plan,
+          },
+          token: token,
         };
 
       } catch (error) {

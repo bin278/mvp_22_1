@@ -1,6 +1,72 @@
 import jwt from 'jsonwebtoken';
 import { getCloudBaseDatabase, CloudBaseCollections, nowISO } from '../database/cloudbase-client';
 
+export interface VerifiedUser {
+  id: string;
+  email?: string;
+  name?: string;
+  avatar?: string;
+  subscription_plan?: string;
+}
+
+/**
+ * 验证JWT token并返回用户信息
+ */
+export async function verifyToken(token: string): Promise<VerifiedUser | null> {
+  try {
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      console.error('[JWT] JWT_SECRET not configured');
+      return null;
+    }
+
+    // 验证并解码token
+    const decoded = jwt.verify(token, jwtSecret) as any;
+
+    // 检查token类型和过期时间
+    if (decoded.type !== 'access') {
+      console.warn('[JWT] Token is not an access token');
+      return null;
+    }
+
+    if (!decoded.userId) {
+      console.warn('[JWT] Token missing userId');
+      return null;
+    }
+
+    // 从数据库获取用户信息
+    const db = getCloudBaseDatabase();
+    const userResult = await db.collection(CloudBaseCollections.USERS)
+      .where({ _id: decoded.userId })
+      .get();
+
+    if (!userResult.data || userResult.data.length === 0) {
+      console.warn(`[JWT] User not found: ${decoded.userId}`);
+      return null;
+    }
+
+    const user = userResult.data[0];
+
+    return {
+      id: user._id,
+      email: user.email || undefined,
+      name: user.name || undefined,
+      avatar: user.avatar || undefined,
+      subscription_plan: user.subscriptionTier === 'pro' ? 'pro' : 'free'
+    };
+
+  } catch (error) {
+    if (error instanceof jwt.TokenExpiredError) {
+      console.warn('[JWT] Token expired');
+    } else if (error instanceof jwt.JsonWebTokenError) {
+      console.warn('[JWT] Invalid token');
+    } else {
+      console.error('[JWT] Token verification error:', error);
+    }
+    return null;
+  }
+}
+
 interface CloudBaseUser {
   _id?: string;
   email: string | null;

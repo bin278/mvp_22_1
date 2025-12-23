@@ -14,7 +14,8 @@ import {
   initAuthStateManager,
   getUser as getAuthUser,
   isAuthenticated,
-  clearAuthState
+  clearAuthState,
+  getStoredAuthState
 } from './auth/auth-state-manager'
 // CloudBase认证API调用函数
 async function apiCall(endpoint: string, data?: any) {
@@ -124,14 +125,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             avatar: authUser.avatar
           };
 
+          // 获取真正的token
+          const authState = getStoredAuthState();
           setUser(cloudBaseUser);
-          // 对于session，我们主要关注认证状态，具体token由auth-state-manager管理
-          setSession({
-            accessToken: 'managed-by-auth-state-manager',
-            refreshToken: 'managed-by-auth-state-manager',
-            accessTokenExpire: Date.now() + 3600000, // 1小时后
-            refreshTokenExpire: Date.now() + 604800000 // 7天后
-          });
+
+          if (authState) {
+            setSession({
+              accessToken: authState.accessToken,
+              refreshToken: authState.refreshToken,
+              accessTokenExpire: Date.now() + (authState.tokenMeta.accessTokenExpiresIn * 1000),
+              refreshTokenExpire: Date.now() + (authState.tokenMeta.refreshTokenExpiresIn * 1000)
+            });
+          } else {
+            setSession(null);
+          }
         } else {
           setUser(null);
           setSession(null);
