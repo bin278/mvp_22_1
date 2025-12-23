@@ -106,10 +106,18 @@ export async function POST(request: NextRequest) {
 
     console.log(`[WeChat Auth] Authentication successful for user: ${result.user.email}`);
 
-    // 4. 创建响应
+    // 4. 创建响应 - 转换用户对象格式以匹配前端期望
+    const userForFrontend = {
+      id: result.user._id, // 将 _id 转换为 id
+      email: result.user.email,
+      name: result.user.name,
+      avatar: result.user.avatar,
+      subscription_plan: result.user.subscriptionTier === 'pro' ? 'pro' : 'free'
+    };
+
     const response = NextResponse.json({
       success: true,
-      user: result.user,
+      user: userForFrontend,
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
       tokenMeta: result.tokenMeta,

@@ -7,8 +7,10 @@ let authInstance: any = null;
 
 // 初始化CloudBase应用
 export async function initializeCloudBase(): Promise<any> {
+  console.log('🚀 开始CloudBase初始化...');
   if (!app && typeof window !== 'undefined') {
     try {
+      console.log('📡 正在获取环境变量...');
       // 从API异步获取环境变量
       const { getPublicEnv } = await import('./env-client');
       const env = await getPublicEnv();
