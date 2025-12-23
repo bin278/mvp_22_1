@@ -26,6 +26,15 @@ interface Message {
   timestamp: Date
 }
 
+// 异步任务状态接口
+interface TaskStatus {
+  taskId: string
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+  progress: number
+  result?: any
+  error?: string
+}
+
 const translations = {
   en: {
     back: "Back to Home",
@@ -186,6 +195,13 @@ function GeneratePageContent() {
   const [modifyingCode, setModifyingCode] = useState("")
   const [isModifying, setIsModifying] = useState(false)
   const [isPreviewLoading, setIsPreviewLoading] = useState(false)
+
+  // 异步任务相关状态
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
+  const [asyncTaskId, setAsyncTaskId] = useState<string | null>(null)
+  const [generationMode, setGenerationMode] = useState<'streaming' | 'async' | 'hybrid'>('streaming')
+  const [asyncProgress, setAsyncProgress] = useState<number>(0)
+  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null)
 
   // 模型选择和订阅状态
   const [selectedModel, setSelectedModel] = useState<string>(getDefaultModel('free'))
@@ -885,6 +901,26 @@ function GeneratePageContent() {
                 // 收到心跳包，更新连接状态
                 lastDataTime = Date.now()
                 console.log('❤️ 收到心跳包，连接正常')
+                continue
+              } else if (parsedData.type === 'mode_switch') {
+                // 智能切换模式
+                console.log(`🔄 后端要求切换到 ${parsedData.mode} 模式: ${parsedData.reason}`)
+                setGenerationMode(parsedData.mode)
+
+                if (parsedData.mode === 'async') {
+                  // 切换到异步模式
+                  setIsStreaming(false)
+                  setAsyncProgress(0)
+                  setCurrentTaskId(parsedData.taskId)
+
+                  // 开始轮询异步任务状态
+                  startPollingAsyncResult(parsedData.taskId)
+                }
+                continue
+              } else if (parsedData.type === 'async_task_ready') {
+                // 异步任务已准备就绪
+                console.log(`✅ 异步任务准备就绪: ${parsedData.asyncTaskId}`)
+                setAsyncTaskId(parsedData.asyncTaskId)
                 continue
               }
 
@@ -2584,4 +2620,390 @@ function GeneratePageContent() {
     </div>
     </SidebarProvider>
   )
+
+  // 异步任务相关函数
+  const startPollingAsyncResult = (taskId: string) => {
+    console.log(`🔄 开始轮询异步任务: ${taskId}`)
+
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/generate-async/${taskId}`, {
+          headers: {
+            'Authorization': `Bearer ${authSession?.accessToken || ''}`,
+          },
+        })
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+
+        const status: TaskStatus = await response.json()
+        setAsyncProgress(status.progress)
+
+        console.log(`📊 异步任务状态: ${status.status}, 进度: ${status.progress}%`)
+
+        if (status.status === 'completed') {
+          // 任务完成，处理结果
+          console.log('✅ 异步任务完成')
+          handleAsyncTaskCompleted(status)
+          stopAsyncPolling()
+
+        } else if (status.status === 'failed') {
+          // 任务失败
+          console.log('❌ 异步任务失败:', status.error)
+          setError(status.error || '异步生成失败')
+          setIsGenerating(false)
+          stopAsyncPolling()
+
+        } else if (status.status === 'running' || status.status === 'pending') {
+          // 继续轮询
+          const nextInterval = status.progress > 50 ? 2000 : 1000
+          setTimeout(poll, nextInterval)
+        } else {
+          // 其他状态（取消等）
+          console.log(`ℹ️ 异步任务状态: ${status.status}`)
+          stopAsyncPolling()
+        }
+
+      } catch (error) {
+        console.error('轮询异步任务失败:', error)
+        // 网络错误时重试
+        setTimeout(poll, 3000)
+      }
+    }
+
+    // 停止之前的轮询
+    stopAsyncPolling()
+
+    // 开始新的轮询
+    poll()
+  }
+
+  const stopAsyncPolling = () => {
+    if (pollingInterval) {
+      clearInterval(pollingInterval)
+      setPollingInterval(null)
+    }
+  }
+
+  const handleAsyncTaskCompleted = (status: TaskStatus) => {
+    if (status.result) {
+      console.log('📦 处理异步任务结果')
+
+      setGeneratedProject(status.result)
+      setSelectedFile('src/App.tsx')
+      setIsGenerating(false)
+      setGenerationMode('streaming') // 重置为流式模式
+      setCurrentTaskId(null)
+      setAsyncTaskId(null)
+      setAsyncProgress(0)
+
+      // 保存到对话
+      if (conversationIdToUse) {
+        saveMessageToConversation(conversationIdToUse, 'assistant',
+          `✅ 代码生成完成！使用了智能异步模式以确保稳定性。`, user?.id || '')
+          .catch(error => console.error('保存消息失败:', error))
+      }
+
+      // 显示成功消息
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: `✅ 代码生成完成！使用了智能异步模式以确保稳定性。`,
+        timestamp: new Date()
+      }])
+
+      // 自动打开预览
+      if (status.result?.files?.['src/App.tsx']) {
+        setTimeout(() => {
+          setPreviewPrompt(prompt.trim())
+          setIsPreviewLoading(true)
+        }, 1000)
+      }
+    }
+  }
+
+  const cancelAsyncGeneration = async () => {
+    if (!asyncTaskId) return
+
+    try {
+      console.log(`🛑 取消异步任务: ${asyncTaskId}`)
+
+      await fetch(`/api/generate-async/${asyncTaskId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${authSession?.accessToken || ''}`,
+        },
+      })
+
+      stopAsyncPolling()
+      setIsGenerating(false)
+      setGenerationMode('streaming')
+      setCurrentTaskId(null)
+      setAsyncTaskId(null)
+      setAsyncProgress(0)
+      setError('异步生成已取消')
+
+    } catch (error) {
+      console.error('取消异步任务失败:', error)
+    }
+  }
+
+  // 复杂度评估函数
+  const assessPromptComplexity = (prompt: string): number => {
+    let complexity = prompt.length
+
+    // 关键词权重
+    const keywords = [
+      'dashboard', 'complex', 'multiple', 'advanced', 'full-featured',
+      '完整的', '复杂的', '多组件', '高级', '完整功能'
+    ]
+    keywords.forEach(keyword => {
+      if (prompt.toLowerCase().includes(keyword.toLowerCase())) {
+        complexity += 200
+      }
+    })
+
+    // 组件数量估算
+    const componentIndicators = ['component', 'page', 'screen', 'modal', 'form', '组件', '页面', '界面', '弹窗']
+    componentIndicators.forEach(indicator => {
+      const matches = prompt.toLowerCase().match(new RegExp(indicator.toLowerCase(), 'g'))
+      if (matches) {
+        complexity += matches.length * 100
+      }
+    })
+
+    return complexity
+  }
+
+  // 智能生成处理
+  const startSmartGeneration = async () => {
+    if (!prompt.trim()) return
+
+    // 重置状态
+    setIsGenerating(true)
+    setIsStreaming(true)
+    setStreamingCode('')
+    setGeneratedProject(null)
+    setGenerationMode('streaming')
+    setCurrentTaskId(null)
+    setAsyncTaskId(null)
+    setAsyncProgress(0)
+    setError(null)
+
+    // 复杂度评估
+    const complexity = assessPromptComplexity(prompt.trim())
+    console.log(`📊 提示复杂度评估: ${complexity}`)
+
+    // 如果复杂度很高，直接使用异步模式
+    if (complexity > 1200) {
+      console.log('🚨 复杂度过高，直接使用异步模式')
+      setGenerationMode('async')
+      setIsStreaming(false)
+      await startAsyncGeneration()
+      return
+    }
+
+    // 否则使用智能流式模式（可能会自动切换）
+    console.log('🎯 使用智能流式模式')
+    await startSmartStreaming()
+  }
+
+  // 直接异步生成（供复杂度评估调用）
+  const startAsyncGeneration = async () => {
+    try {
+      console.log('🚀 启动异步生成模式')
+
+      const response = await fetch('/api/generate-async', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authSession?.accessToken || ''}`,
+        },
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          model: selectedModel,
+          conversationId: conversationIdToUse
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+
+      const result = await response.json()
+      const taskId = result.taskId
+
+      console.log(`📋 异步任务已提交: ${taskId}`)
+      setCurrentTaskId(taskId)
+
+      // 开始轮询
+      startPollingAsyncResult(taskId)
+
+    } catch (error) {
+      console.error('启动异步生成失败:', error)
+      setError('启动异步生成失败，请重试')
+      setIsGenerating(false)
+      setGenerationMode('streaming')
+    }
+  }
+
+  // 智能流式生成
+  const startSmartStreaming = async () => {
+    console.log('🎯 启动智能流式生成')
+
+    try {
+      const response = await fetch('/api/generate-stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authSession?.accessToken || ''}`,
+        },
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          model: selectedModel,
+          conversationId: conversationIdToUse
+        }),
+        signal: abortController?.signal,
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || `HTTP ${response.status}`)
+      }
+
+      await processSmartStreaming(response)
+
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('用户取消生成')
+        return
+      }
+
+      console.error('智能流式生成失败:', error)
+
+      // 如果是网络错误或超时，自动切换到异步模式
+      if (error.message.includes('fetch') || error.message.includes('network') || error.message.includes('timeout')) {
+        console.log('🔄 检测到网络问题，自动切换到异步模式')
+        setGenerationMode('async')
+        setIsStreaming(false)
+        await startAsyncGeneration()
+      } else {
+        setError(error.message || '生成失败，请重试')
+        setIsGenerating(false)
+        setIsStreaming(false)
+      }
+    }
+  }
+
+  // 处理智能流式响应
+  const processSmartStreaming = async (response: Response) => {
+    const reader = response.body?.getReader()
+    const decoder = new TextDecoder()
+    let streamingCodeBuffer = ''
+    let lastDataTime = Date.now()
+
+    if (!reader) {
+      throw new Error('No response body reader available')
+    }
+
+    // 连接检测定时器
+    const connectionCheckInterval = setInterval(() => {
+      const timeSinceLastData = Date.now() - lastDataTime
+      if (timeSinceLastData > 30000) {
+        console.warn(`⚠️ 流式连接检测: ${Math.round(timeSinceLastData/1000)}秒无数据，可能需要切换模式`)
+
+        if (streamingCodeBuffer.length > 50) {
+          // 有足够内容，切换到异步模式继续
+          console.log('🔄 自动切换到异步模式继续生成')
+          setGenerationMode('async')
+          setIsStreaming(false)
+          startAsyncGeneration()
+          clearInterval(connectionCheckInterval)
+        }
+      }
+    }, 5000)
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+
+        if (done) {
+          break
+        }
+
+        const chunk = decoder.decode(value, { stream: true })
+        const lines = chunk.split('\n')
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6)
+
+            if (data === '[DONE]') {
+              break
+            }
+
+            try {
+              const parsedData = JSON.parse(data)
+
+              if (parsedData.type === 'chars') {
+                streamingCodeBuffer += parsedData.chars
+                setStreamingCode(streamingCodeBuffer)
+                lastDataTime = Date.now()
+
+                // 自动滚动
+                setTimeout(() => {
+                  const codeContainer = document.querySelector('.overflow-auto')
+                  if (codeContainer) {
+                    codeContainer.scrollTop = codeContainer.scrollHeight
+                  }
+                }, 0)
+
+              } else if (parsedData.type === 'heartbeat') {
+                lastDataTime = Date.now()
+                console.log('❤️ 收到心跳包，流式连接正常')
+
+              } else if (parsedData.type === 'mode_switch') {
+                console.log(`🔄 后端要求切换到 ${parsedData.mode} 模式: ${parsedData.reason}`)
+                setGenerationMode(parsedData.mode)
+
+                if (parsedData.mode === 'async') {
+                  setIsStreaming(false)
+
+                  if (parsedData.asyncTaskId) {
+                    setAsyncTaskId(parsedData.asyncTaskId)
+                    startPollingAsyncResult(parsedData.asyncTaskId)
+                  }
+                }
+                clearInterval(connectionCheckInterval)
+                return // 退出流式处理
+
+              } else if (parsedData.type === 'complete') {
+                const project = parsedData.project
+                setGeneratedProject(project)
+                setSelectedFile('src/App.tsx')
+                setIsGenerating(false)
+                setIsStreaming(false)
+
+                // 保存消息
+                if (conversationIdToUse) {
+                  await saveMessageToConversation(conversationIdToUse, 'assistant',
+                    `✅ 代码生成完成！使用了智能流式模式。`, user?.id || '')
+                }
+
+                clearInterval(connectionCheckInterval)
+                return
+              }
+
+            } catch (parseError) {
+              console.warn('解析流式数据失败:', parseError)
+            }
+          }
+        }
+      }
+
+    } finally {
+      clearInterval(connectionCheckInterval)
+    }
+  }
 }
