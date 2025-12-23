@@ -274,8 +274,37 @@ async function getUserUsageStatsCloudBase(userId: string): Promise<UsageStats> {
                                 error?.message?.includes('ResourceNotFound');
 
     if (isCollectionNotExist) {
-      console.log("[getUserUsageStatsCloudBase] Collection 'recommendation_usage' does not exist, returning 0");
-      currentPeriodUsage = 0;
+      console.log("[getUserUsageStatsCloudBase] Collection 'recommendation_usage' does not exist, attempting to create it");
+
+      // 尝试创建集合（通过插入初始化记录）
+      try {
+        const initRecord = {
+          user_id: 'system-init',
+          usage_count: 0,
+          created_at: new Date().toISOString(),
+          period_start: start.toISOString(),
+          period_end: end.toISOString(),
+          is_init_record: true
+        };
+
+        await db.collection("recommendation_usage").add(initRecord);
+        console.log("[getUserUsageStatsCloudBase] Successfully created recommendation_usage collection");
+
+        // 立即删除初始化记录
+        const queryResult = await db.collection("recommendation_usage")
+          .where({ user_id: 'system-init' })
+          .get();
+
+        if (queryResult.data && queryResult.data.length > 0) {
+          await db.collection("recommendation_usage").doc(queryResult.data[0]._id).remove();
+          console.log("[getUserUsageStatsCloudBase] Cleaned up init record");
+        }
+
+        currentPeriodUsage = 0; // 新集合当然是0
+      } catch (createError) {
+        console.error("[getUserUsageStatsCloudBase] Failed to create collection:", createError);
+        currentPeriodUsage = 0; // 创建失败也返回0，不影响用户使用
+      }
     } else {
       // 其他错误重新抛出
       throw error;

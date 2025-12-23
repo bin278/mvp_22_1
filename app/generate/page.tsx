@@ -384,6 +384,34 @@ function GeneratePageContent() {
     }
   }
 
+  const saveFilesToConversation = async (conversationId: string, files: Record<string, string>) => {
+    if (!conversationId || !authSession?.accessToken || !files) return
+
+    try {
+      const fileArray = Object.entries(files).map(([file_path, file_content]) => ({
+        file_path,
+        file_content,
+      }))
+
+      const response = await fetch(`/api/conversations/${conversationId}/files`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authSession.accessToken}`,
+        },
+        body: JSON.stringify({ files: fileArray }),
+      })
+
+      if (!response.ok) {
+        console.error("Failed to save files to conversation")
+      } else {
+        console.log(`✅ Saved ${fileArray.length} files to conversation ${conversationId}`)
+      }
+    } catch (error) {
+      console.error("Error saving files to conversation:", error)
+    }
+  }
+
   // 加载对话
   const loadConversation = async (conversationId: string | null) => {
     if (!conversationId || !authSession?.accessToken) {
@@ -839,9 +867,10 @@ function GeneratePageContent() {
                 setMessages(prev => [...prev, aiMessage])
                 
                 // 保存AI消息和文件到数据库
-                if (currentConversationId) {
-                  await saveMessage('assistant', aiMessageContent)
-                  await saveFiles(project.files)
+                if (conversationIdToUse) {
+                  console.log('💾 Saving AI response to conversation:', conversationIdToUse)
+                  await saveMessageToConversation(conversationIdToUse, 'assistant', aiMessageContent)
+                  await saveFilesToConversation(conversationIdToUse, project.files)
                 }
 
                 // Auto-open preview if live preview is enabled
