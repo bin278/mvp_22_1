@@ -4,6 +4,326 @@ import { AVAILABLE_MODELS, canUseModel, type SubscriptionTier } from '@/lib/subs
 import { requireAuth } from '@/lib/auth/auth'
 import { add } from '@/lib/database/cloudbase'
 
+// 生成状态管理接口
+interface GenerationState {
+  taskId: string
+  status: 'streaming' | 'fallback_async' | 'completed' | 'failed'
+  streamedContent: string
+  progress: number
+  lastActivity: number
+  mode: 'streaming' | 'async'
+}
+
+// 全局状态存储（生产环境应该用Redis）
+const generationStates = new Map<string, GenerationState>()
+
+// 风险评估函数
+function assessGenerationRisk(prompt: string, model: string): boolean {
+  const complexity = prompt.length + (prompt.split(' ').length * 2)
+  const isComplexModel = model.includes('gpt-4') || model.includes('claude') || model.includes('deepseek')
+
+  // 复杂度阈值：长提示词 + 复杂模型 = 高风险
+  return complexity > 800 || (complexity > 400 && isComplexModel)
+}
+
+// 实时风险检测
+function shouldFallback(state: GenerationState): boolean {
+  const timeElapsed = Date.now() - state.lastActivity
+
+  // 条件1：长时间无响应（30秒）
+  if (timeElapsed > 30000) return true
+
+  // 条件2：内容过少但时间较长（可能卡住）
+  if (timeElapsed > 15000 && state.streamedContent.length < 50) return true
+
+  // 条件3：进度停滞
+  if (state.progress > 0 && timeElapsed > 10000 && state.progress < 20) return true
+
+  return false
+}
+
+// 异步后备处理
+async function startAsyncFallback(
+  taskId: string,
+  prompt: string,
+  model: string,
+  apiKey: string,
+  baseUrl: string,
+  existingContent: string,
+  user: any
+) {
+  try {
+    console.log(`🔄 启动异步后备处理，任务ID: ${taskId}`)
+
+    const client = new OpenAI({
+      apiKey,
+      baseURL: baseUrl,
+    })
+
+    // 从现有内容继续生成
+    const fullPrompt = existingContent
+      ? `基于以下已生成的代码片段，继续完成完整的React组件：\n\n已生成：${existingContent}\n\n原始需求：${prompt}\n\n请生成完整的、可运行的代码。`
+      : prompt
+
+    const completion = await client.chat.completions.create({
+      model,
+      messages: [
+        {
+          role: 'system',
+          content: `Generate a complete React component. Return ONLY the React component code, no explanations, no markdown, no JSON structure.
+
+Requirements:
+1. Use proper code formatting with consistent indentation (2 spaces)
+2. Include all necessary React imports
+3. Create a functional component with proper JSX structure
+4. Use Tailwind CSS classes for styling
+5. Make it immediately runnable
+6. Export as default
+
+Example output:
+import React from 'react';
+
+function App() {
+  return (
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+      <div className="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
+        <h1 className="text-2xl font-bold text-gray-800 mb-4">Hello World</h1>
+        <p className="text-gray-600">Welcome to my app!</p>
+      </div>
+    </div>
+  );
+}
+
+export default App;`
+        },
+        {
+          role: 'user',
+          content: fullPrompt
+        }
+      ],
+      max_tokens: parseInt(process.env.DEEPSEEK_MAX_TOKENS || '4000'),
+      temperature: parseFloat(process.env.DEEPSEEK_TEMPERATURE || '0.7'),
+    })
+
+    const additionalContent = completion.choices[0]?.message?.content || ''
+    const finalContent = existingContent + additionalContent
+
+    // 格式化代码
+    let formattedCode = formatCodeString(finalContent)
+
+    // 确保有有效的代码
+    if (!formattedCode || formattedCode.length < 100) {
+      formattedCode = `import React from 'react';
+
+function GeneratedApp() {
+  return (
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+      <div className="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
+        <h1 className="text-2xl font-bold text-gray-800 mb-4">Generated App</h1>
+        <p className="text-gray-600 mb-4">
+          Code generation completed with fallback mode.
+        </p>
+        <div className="bg-blue-50 p-4 rounded border-l-4 border-blue-400">
+          <p className="text-sm text-blue-700">
+            <strong>Note:</strong> This was generated using fallback mode due to complexity.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default GeneratedApp;`
+    }
+
+    // 创建项目结构
+    const project = {
+      files: {
+        'src/App.tsx': formattedCode,
+        'src/index.css': `body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+code {
+  font-family: 'Monaco', 'Menlo', monospace;
+}`,
+        'package.json': JSON.stringify({
+          "name": "generated-app",
+          "version": "0.1.0",
+          "dependencies": {
+            "react": "^18.2.0",
+            "react-dom": "^18.2.0",
+            "react-scripts": "5.0.1"
+          }
+        }, null, 2)
+      },
+      projectName: 'smart-generated-app'
+    }
+
+    // 更新状态
+    const state = generationStates.get(taskId)
+    if (state) {
+      state.status = 'completed'
+      state.progress = 100
+    }
+
+    console.log(`✅ 异步后备处理完成，任务ID: ${taskId}`)
+
+    return project
+
+  } catch (error) {
+    console.error('异步后备处理失败:', error)
+
+    const state = generationStates.get(taskId)
+    if (state) {
+      state.status = 'failed'
+    }
+
+    throw error
+  }
+}
+
+// 清理重复的代码定义
+
+// 全局状态存储
+const generationStates = new Map<string, GenerationState>()
+
+// 风险评估函数
+function assessGenerationRisk(prompt: string, model: string): boolean {
+  const complexity = prompt.length + (prompt.split(' ').length * 2)
+  const isComplexModel = model.includes('gpt-4') || model.includes('claude')
+
+  // 复杂度阈值：长提示词 + 复杂模型 = 高风险
+  return complexity > 1000 || (complexity > 500 && isComplexModel)
+}
+
+// 风险检测函数
+function shouldFallback(state: GenerationState, currentTime: number): boolean {
+  const timeElapsed = currentTime - state.lastActivity
+
+  // 条件：生成时间过长 + 内容较少 = 可能卡住或超时风险
+  return timeElapsed > 30000 && state.streamedContent.length < 200
+}
+
+// 异步后备处理
+async function startAsyncFallback(
+  taskId: string,
+  prompt: string,
+  model: string,
+  user: any,
+  existingContent: string,
+  conversationId?: string
+) {
+  try {
+    console.log(`🔄 启动异步后备处理: ${taskId}`)
+
+    // 创建异步任务
+    const asyncTaskId = `async_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+
+    const task = {
+      taskId: asyncTaskId,
+      userId: user.id,
+      conversationId,
+      prompt: `Continue generating from this existing code:\n\n${existingContent}\n\nOriginal request: ${prompt}`,
+      model: model,
+      status: 'running',
+      progress: 50, // 从50%开始，因为已有部分内容
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+
+    taskQueue.set(asyncTaskId, task)
+
+    // 异步执行（不阻塞当前响应）
+    setTimeout(async () => {
+      try {
+        const client = new OpenAI({
+          apiKey: process.env.DEEPSEEK_API_KEY,
+          baseURL: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1',
+        })
+
+        const completion = await client.chat.completions.create({
+          model: model,
+          messages: [
+            {
+              role: 'system',
+              content: `Generate a complete React component. Return ONLY the React component code, no explanations, no markdown, no JSON structure.
+
+Requirements:
+1. Use proper code formatting with consistent indentation (2 spaces)
+2. Include all necessary React imports
+3. Create a functional component with proper JSX structure
+4. Use Tailwind CSS classes for styling
+5. Make it immediately runnable
+6. Export as default`
+            },
+            {
+              role: 'user',
+              content: task.prompt
+            }
+          ],
+          max_tokens: parseInt(process.env.DEEPSEEK_MAX_TOKENS || '4000'),
+          temperature: parseFloat(process.env.DEEPSEEK_TEMPERATURE || '0.7'),
+        })
+
+        const additionalContent = completion.choices[0]?.message?.content || ''
+        const finalContent = existingContent + additionalContent
+
+        // 格式化代码
+        const formattedCode = formatCodeString(finalContent)
+
+        const project = {
+          files: {
+            'src/App.tsx': formattedCode,
+            'src/index.css': `body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+code {
+  font-family: 'Monaco', 'Menlo', monospace;
+}`,
+            'package.json': JSON.stringify({
+              "name": "generated-app",
+              "version": "0.1.0",
+              "dependencies": {
+                "react": "^18.2.0",
+                "react-dom": "^18.2.0",
+                "react-scripts": "5.0.1"
+              }
+            }, null, 2)
+          },
+          projectName: 'smart-generated-app'
+        }
+
+        // 更新任务状态
+        task.status = 'completed'
+        task.progress = 100
+        task.result = project
+        task.completedAt = new Date().toISOString()
+        task.updatedAt = new Date().toISOString()
+        taskQueue.set(asyncTaskId, task)
+
+        console.log(`✅ 异步后备处理完成: ${asyncTaskId}`)
+
+      } catch (error) {
+        console.error(`❌ 异步后备处理失败: ${asyncTaskId}`, error)
+        task.status = 'failed'
+        task.error = error.message
+        task.updatedAt = new Date().toISOString()
+        taskQueue.set(asyncTaskId, task)
+      }
+    }, 100)
+
+    return asyncTaskId
+
+  } catch (error) {
+    console.error('启动异步后备失败:', error)
+    return null
+  }
+}
+
 // 保存消息到对话
 async function saveMessageToConversation(conversationId: string, role: 'user' | 'assistant', content: string, userId: string) {
   try {
@@ -101,6 +421,71 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    // 生成任务ID
+    const taskId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+
+    // 初始化生成状态
+    const state: GenerationState = {
+      taskId,
+      status: 'streaming',
+      streamedContent: '',
+      progress: 0,
+      lastActivity: Date.now(),
+      mode: 'streaming'
+    }
+    generationStates.set(taskId, state)
+
+    // 风险评估
+    const isHighRisk = assessGenerationRisk(prompt, requestedModel)
+    console.log(`📊 复杂度评估: ${prompt.length} 字符, 风险等级: ${isHighRisk ? '高' : '低'}`)
+
+    if (isHighRisk) {
+      console.log('🚨 高风险任务，直接切换到异步模式')
+
+      // 异步处理高风险任务
+      startAsyncFallback(taskId, prompt, requestedModel, process.env.DEEPSEEK_API_KEY!, process.env.DEEPSEEK_BASE_URL!, '', user)
+        .then(project => {
+          // 异步完成时更新状态
+          const currentState = generationStates.get(taskId)
+          if (currentState) {
+            currentState.status = 'completed'
+            currentState.progress = 100
+          }
+        })
+        .catch(error => {
+          console.error('异步生成失败:', error)
+          const currentState = generationStates.get(taskId)
+          if (currentState) {
+            currentState.status = 'failed'
+          }
+        })
+
+      // 返回异步模式切换信号
+      return new Response(
+        `data: ${JSON.stringify({
+          type: 'mode_switch',
+          mode: 'async',
+          taskId,
+          reason: 'high_complexity'
+        })}\n\n` +
+        `data: ${JSON.stringify({
+          type: 'async_started',
+          taskId,
+          message: '复杂任务已切换到异步模式，请等待完成'
+        })}\n\n` +
+        `data: [DONE]\n\n`,
+        {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+          },
+        }
+      )
+    }
+
+    // 低风险任务：使用智能流式生成
+    console.log('🎯 低风险任务，使用智能流式生成模式')
 
     console.log('🔐 Step 3: Checking model permissions')
 
@@ -298,13 +683,58 @@ export default App;`
           let charBuffer = ''
           const BATCH_SIZE = 5 // 减少批量大小，提高响应性
 
-          // Process streaming chunks in real-time - optimized for production
+          // Process streaming chunks in real-time - optimized for production with smart fallback
+          let fallbackTriggered = false
+
           for await (const chunk of completion) {
             const content = chunk.choices[0]?.delta?.content
             if (content) {
               accumulatedContent += content
 
-              // 优化2: 批量发送字符，减少网络往返
+              // 更新生成状态
+              state.streamedContent = accumulatedContent
+              state.lastActivity = Date.now()
+              state.progress = Math.min(90, (accumulatedContent.length / Math.max(prompt.length * 2, 500)) * 100)
+
+              // 实时风险检测
+              if (!fallbackTriggered && shouldFallback(state)) {
+                console.log('🔄 检测到生成风险，切换到异步模式')
+                fallbackTriggered = true
+                state.status = 'fallback_async'
+                state.mode = 'async'
+
+                // 通知前端切换模式
+                safeEnqueue(`data: ${JSON.stringify({
+                  type: 'mode_switch',
+                  mode: 'async',
+                  taskId: state.taskId,
+                  reason: 'runtime_risk_detected',
+                  progress: state.progress
+                })}\n\n`)
+
+                // 启动异步后备处理
+                startAsyncFallback(
+                  state.taskId,
+                  prompt,
+                  requestedModel,
+                  apiKey,
+                  baseUrl,
+                  accumulatedContent,
+                  user
+                ).catch(error => {
+                  console.error('异步后备处理失败:', error)
+                  safeEnqueue(`data: ${JSON.stringify({
+                    type: 'error',
+                    error: '异步处理失败',
+                    details: error.message
+                  })}\n\n`)
+                })
+
+                // 停止流式处理
+                break
+              }
+
+              // 批量发送字符
               for (const char of content) {
                 charBuffer += char
                 streamedChars++
@@ -313,15 +743,46 @@ export default App;`
                   const batchData = {
                     type: 'chars',
                     chars: charBuffer,
-                    totalLength: streamedChars
+                    totalLength: streamedChars,
+                    progress: state.progress
                   }
 
                   safeEnqueue(`data: ${JSON.stringify(batchData)}\n\n`)
                   charBuffer = ''
 
-                  // 优化3: 大幅减少延迟，从20ms改为2ms
+                  // 减少延迟以提高响应性
                   await new Promise(resolve => setTimeout(resolve, 2))
                 }
+              }
+
+                // 通知前端切换模式
+                safeEnqueue(`data: ${JSON.stringify({
+                  type: 'mode_switch',
+                  mode: 'async',
+                  taskId: generationState.taskId,
+                  reason: 'generation_timeout_risk'
+                })}\n\n`)
+
+                // 启动异步后备处理
+                const asyncTaskId = await startAsyncFallback(
+                  generationState.taskId,
+                  prompt,
+                  model,
+                  user,
+                  accumulatedContent,
+                  conversationId
+                )
+
+                if (asyncTaskId) {
+                  // 更新前端的异步任务ID
+                  safeEnqueue(`data: ${JSON.stringify({
+                    type: 'async_task_ready',
+                    asyncTaskId: asyncTaskId
+                  })}\n\n`)
+                }
+
+                // 停止流式处理
+                break
               }
             }
           }
@@ -590,4 +1051,6 @@ code {
       { status: 500 }
     )
   }
+}
+
 }
