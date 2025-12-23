@@ -17,7 +17,7 @@ export function getCloudBaseApp() {
     return cachedApp;
   }
 
-  const envId = process.env.NEXT_PUBLIC_WECHAT_CLOUDBASE_ID || process.env.TENCENT_CLOUD_ENV_ID;
+  const envId = process.env.TENCENT_CLOUD_ENV_ID || process.env.NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID;
   const secretId = process.env.CLOUDBASE_SECRET_ID || process.env.TENCENT_CLOUD_SECRET_ID;
   const secretKey = process.env.CLOUDBASE_SECRET_KEY || process.env.TENCENT_CLOUD_SECRET_KEY;
 

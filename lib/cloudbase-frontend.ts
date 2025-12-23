@@ -12,7 +12,7 @@ export async function initializeCloudBase(): Promise<any> {
       // 从API异步获取环境变量
       const { getPublicEnv } = await import('./env-client');
       const env = await getPublicEnv();
-      const envId = env.TENCENT_CLOUD_ENV_ID;
+      const envId = env.NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID;
 
       if (!envId || envId === 'your-env-id' || envId === 'your_environment_id_here') {
         console.error('❌ CloudBase环境ID未正确配置。请在腾讯云控制台设置 TENCENT_CLOUD_ENV_ID 环境变量。');

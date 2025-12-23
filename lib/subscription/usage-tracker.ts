@@ -36,7 +36,7 @@ function getCloudBaseApp() {
     return cloudbaseAppInstance;
   }
   cloudbaseAppInstance = cloudbase.init({
-    env: process.env.NEXT_PUBLIC_WECHAT_CLOUDBASE_ID,
+    env: process.env.TENCENT_CLOUD_ENV_ID,
     secretId: process.env.CLOUDBASE_SECRET_ID,
     secretKey: process.env.CLOUDBASE_SECRET_KEY,
   });
