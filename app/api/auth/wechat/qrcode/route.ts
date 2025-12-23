@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
 
   try {
     // 获取环境变量
-    const appId = process.env.WECHAT_APP_ID;
+    const appId = process.env.WECHAT_APP_ID || process.env.NEXT_PUBLIC_WECHAT_APP_ID;
     const appSecret = process.env.WECHAT_APP_SECRET;
 
     // 必须配置微信应用信息
