@@ -35,11 +35,27 @@ function getCloudBaseApp() {
   if (cloudbaseAppInstance) {
     return cloudbaseAppInstance;
   }
+
+  const envId = process.env.TENCENT_CLOUD_ENV_ID || process.env.NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID;
+  const secretId = process.env.CLOUDBASE_SECRET_ID || process.env.TENCENT_CLOUD_SECRET_ID;
+  const secretKey = process.env.CLOUDBASE_SECRET_KEY || process.env.TENCENT_CLOUD_SECRET_KEY;
+
+  if (!envId) {
+    throw new Error('Missing TENCENT_CLOUD_ENV_ID or NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID environment variable');
+  }
+
+  if (!secretId || !secretKey) {
+    throw new Error('Missing CLOUDBASE_SECRET_ID/CLOUDBASE_SECRET_KEY or TENCENT_CLOUD_SECRET_ID/TENCENT_CLOUD_SECRET_KEY environment variables');
+  }
+
+  console.log('[CloudBase Usage Tracker] Initializing CloudBase with envId:', envId);
+
   cloudbaseAppInstance = cloudbase.init({
-    env: process.env.TENCENT_CLOUD_ENV_ID,
-    secretId: process.env.CLOUDBASE_SECRET_ID,
-    secretKey: process.env.CLOUDBASE_SECRET_KEY,
+    env: envId,
+    secretId,
+    secretKey,
   });
+
   return cloudbaseAppInstance;
 }
 
