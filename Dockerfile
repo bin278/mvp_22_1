@@ -1,95 +1,84 @@
-# ===========================================
-# 腾讯云 Docker 部署配置
-# 支持 CloudBase + 微信支付 + 支付宝
-# ===========================================
 
-# 使用官方 Node.js 运行时作为基础镜像 (云托管优化)
+# 使用多阶段构建减小镜像大小
 FROM node:20-alpine AS base
 
-# 安装 pnpm 和必要的系统依赖
-RUN npm install -g pnpm@8 && \
-    apk add --no-cache libc6-compat curl wget
+# 安装pnpm
+RUN npm install -g pnpm
 
 # 设置工作目录
 WORKDIR /app
 
-# 复制 package.json 和 pnpm-lock.yaml
-COPY package.json pnpm-lock.yaml* ./
+# ========== 构建时环境变量声明 ==========
+ARG NODE_ENV=production
+ARG NEXT_PUBLIC_DEPLOYMENT_REGION=CN
 
-# ===========================================
-# 依赖安装阶段 - 利用 Docker 层缓存
-# ===========================================
-FROM base AS deps
-# 安装所有依赖（包括 devDependencies 用于构建）
-# 处理 pnpm lockfile 兼容性问题
-RUN pnpm install --frozen-lockfile --prod=false --force || \
-    (rm -f pnpm-lock.yaml && pnpm install --prod=false) || \
-    npm install
+ENV NODE_ENV=$NODE_ENV
+ENV NEXT_PUBLIC_DEPLOYMENT_REGION=$NEXT_PUBLIC_DEPLOYMENT_REGION
 
-# ===========================================
-# 构建阶段 - 腾讯云优化
-# ===========================================
-FROM base AS builder
-COPY --from=deps /app/node_modules ./node_modules
+# 复制包管理文件
+COPY package.json pnpm-lock.yaml ./
+
+# 安装依赖
+RUN pnpm install --frozen-lockfile
+
+# 复制源代码
 COPY . .
 
-# 设置腾讯云云托管部署相关的环境变量
-ENV NEXT_TELEMETRY_DISABLED=1
-ENV NODE_ENV=production
-ENV DEPLOYMENT_REGION=cn
-ENV CLOUDBASE_BUILD=true
+# 1. 声明构建参数 (ARG) 并提供【默认占位符】
+# 关键修改：添加 =... 默认值。
+# 这样即使腾讯云构建时不传这些参数，Docker 构建也能通过，
+# 从而满足 Next.js 构建时对 process.env 的基本检查。
+ARG NEXT_PUBLIC_SUPABASE_URL=https://build-placeholder.supabase.co
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY=build-placeholder-key
 
-# CloudBase 和支付相关的环境变量（在部署时通过 ARG 或 ENV 设置）
-ARG NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID
-ARG NEXT_PUBLIC_WECHAT_CLOUDBASE_ID
-ARG CLOUDBASE_SECRET_ID
-ARG CLOUDBASE_SECRET_KEY
-ARG NEXT_PUBLIC_APP_URL
-
-ENV NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID=$NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID
-ENV NEXT_PUBLIC_WECHAT_CLOUDBASE_ID=$NEXT_PUBLIC_WECHAT_CLOUDBASE_ID
-ENV CLOUDBASE_SECRET_ID=$CLOUDBASE_SECRET_ID
-ENV CLOUDBASE_SECRET_KEY=$CLOUDBASE_SECRET_KEY
-ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+# 2. 将 ARG 转为 ENV
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
 
 # 构建应用
+# 此时 Next.js 会使用上面的假值完成构建。
+# 只要你的代码里没有在 import 阶段就发起网络请求（通常是在组件 useEffect 或 Server Component 内部发起），
+# 使用假值构建是完全安全的。
 RUN pnpm build
 
-# ===========================================
-# 生产运行阶段 - 腾讯云优化
-# ===========================================
-FROM base AS runner
+# 生产阶段
+FROM node:20-alpine AS production
 
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-ENV DEPLOYMENT_REGION=cn
+# 安装pnpm
+RUN npm install -g pnpm
 
-# 创建非 root 用户
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
+# 设置工作目录
+WORKDIR /app
 
-# 复制必要的文件
-COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# ========== 运行时配置说明 ==========
+# 真实的配置通过环境变量注入到容器中，
+# 前端通过 /api/auth/config 接口在运行时获取这些 MY_NEXT_PUBLIC_... 变量。
 
-# 设置正确的权限
+ARG PORT=3000
+ARG NEXT_PUBLIC_DEPLOYMENT_REGION=CN
+
+ENV PORT=$PORT
+ENV NEXT_PUBLIC_DEPLOYMENT_REGION=$NEXT_PUBLIC_DEPLOYMENT_REGION
+
+# 从构建阶段复制必要的文件
+COPY --from=base /app/package.json /app/pnpm-lock.yaml ./
+COPY --from=base /app/.next ./.next
+COPY --from=base /app/public ./public
+COPY --from=base /app/next.config.mjs ./
+
+# 安装生产依赖
+RUN pnpm install --frozen-lockfile --prod
+
+# 创建非root用户
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S nextjs -u 1001
+
+# 更改文件所有权
 RUN chown -R nextjs:nodejs /app
-
-# 切换到非 root 用户
 USER nextjs
 
 # 暴露端口
 EXPOSE 3000
 
-# 腾讯云健康检查配置
-ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
-
-# 添加健康检查
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/api/health || exit 1
-
 # 启动应用
-CMD ["node", "server.js"]
-
+CMD ["pnpm", "start"]
