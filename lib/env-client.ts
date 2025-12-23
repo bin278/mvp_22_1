@@ -21,15 +21,51 @@ let envPromise: Promise<PublicEnv> | null = null
  * 从 API 获取环境变量
  */
 async function fetchEnvFromAPI(): Promise<PublicEnv> {
-  // 临时跳过 API 调用，直接使用 fallback 值以确保应用能工作
-  console.log('🔄 Skipping /api/env call, using fallback values directly')
+  console.log('🌐 Fetching environment variables from /api/env')
+  try {
+    const response = await fetch('/api/env', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      // 使用浏览器缓存，避免每次都请求
+      cache: 'force-cache',
+    })
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch env: ${response.status} ${response.statusText}`)
+    }
+
+    const data = await response.json()
+
+    console.log('📡 /api/env response:', {
+      success: data.success,
+      hasEnv: !!data.env,
+      error: data.error,
+      status: response.status
+    })
+
+    if (!data.success) {
+      console.warn('⚠️ /api/env returned success: false, using fallback values:', data.error)
+      // 不抛出错误，而是使用 fallback
+    } else {
+      console.log('✅ /api/env returned valid data')
+      return data.env as PublicEnv
+    }
+  } catch (error) {
+    console.error('Failed to fetch environment variables from API:', error)
+    // 如果 API 失败，使用开发环境回退值
+  }
+
+  // 使用 fallback 值
   return {
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
-    NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID: process.env.NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID || 'cloud1-3gn61ziydcfe6a57',
-    NEXT_PUBLIC_WECHAT_APP_ID: process.env.WECHAT_APP_ID || 'wxdcd6dda48f3245e1',
+    NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID: process.env.NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID || '',
+    NEXT_PUBLIC_WECHAT_APP_ID: process.env.NEXT_PUBLIC_WECHAT_APP_ID || '',
     DEPLOYMENT_REGION: process.env.DEPLOYMENT_REGION || 'cn',
     NODE_ENV: process.env.NODE_ENV || 'development',
   }
+}
 
   /* 注释掉原来的 API 调用代码
   try {
