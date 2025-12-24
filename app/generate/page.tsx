@@ -213,6 +213,7 @@ function GeneratePageContent() {
   const [lastPreviewCode, setLastPreviewCode] = useState<string>('')
   const [streamingCode, setStreamingCode] = useState<string>('')
   const [isStreaming, setIsStreaming] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const previewRefreshTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const isManualRefreshRef = useRef<boolean>(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
