@@ -194,7 +194,6 @@ function generateInSegments(
     },
   });
 }
-}
 
 // 生成单个段落的函数
 async function generateSegment(prompt: string, model: string, user: any): Promise<string> {
