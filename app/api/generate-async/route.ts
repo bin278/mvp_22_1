@@ -3,6 +3,16 @@ import { requireAuth } from '@/lib/auth/auth'
 import { add, update, query } from '@/lib/database/cloudbase'
 import OpenAI from 'openai'
 
+// 导入SSE广播函数
+function broadcastTaskUpdate(taskId: string, data: any) {
+  // 动态导入SSE模块
+  import('./[taskId]/stream/route').then(({ broadcastTaskUpdate: broadcast }) => {
+    broadcast(taskId, data)
+  }).catch(error => {
+    console.error('Failed to import broadcast function:', error)
+  })
+}
+
 // 任务状态枚举
 enum TaskStatus {
   PENDING = 'pending',
@@ -224,6 +234,14 @@ async function processAsyncTask(task: GenerationTask, existingContent?: string) 
     task.updatedAt = new Date().toISOString()
     taskQueue.set(task.taskId, task)
 
+    // 广播开始处理状态
+    broadcastTaskUpdate(task.taskId, {
+      type: 'status_update',
+      status: TaskStatus.RUNNING,
+      progress: 10,
+      message: '开始处理任务...'
+    })
+
     // 如果有现有内容，从断点继续生成
     const fullPrompt = existingContent
       ? `Continue generating from this existing code:\n\n${existingContent}\n\nAdditional requirements: ${task.prompt}`
@@ -237,6 +255,13 @@ async function processAsyncTask(task: GenerationTask, existingContent?: string) 
         task.progress = 10 + (progress * 0.8) // 10-90%
         task.updatedAt = new Date().toISOString()
         taskQueue.set(task.taskId, task)
+
+        // 广播进度更新
+        broadcastTaskUpdate(task.taskId, {
+          type: 'progress_update',
+          progress: task.progress,
+          message: `生成进度: ${Math.round(task.progress)}%`
+        })
       }
     )
 
@@ -248,6 +273,13 @@ async function processAsyncTask(task: GenerationTask, existingContent?: string) 
     task.updatedAt = new Date().toISOString()
     taskQueue.set(task.taskId, task)
 
+    // 广播完成状态
+    broadcastTaskUpdate(task.taskId, {
+      type: 'completed',
+      result: result,
+      message: '代码生成完成！'
+    })
+
     console.log(`✅ 异步任务 ${task.taskId} 完成`)
 
   } catch (error: any) {
@@ -258,5 +290,12 @@ async function processAsyncTask(task: GenerationTask, existingContent?: string) 
     task.error = error.message || '生成失败'
     task.updatedAt = new Date().toISOString()
     taskQueue.set(task.taskId, task)
+
+    // 广播失败状态
+    broadcastTaskUpdate(task.taskId, {
+      type: 'failed',
+      error: task.error,
+      message: '代码生成失败'
+    })
   }
 }

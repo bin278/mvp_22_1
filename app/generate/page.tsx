@@ -216,6 +216,7 @@ function GeneratePageContent() {
   const previewRefreshTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const isManualRefreshRef = useRef<boolean>(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const sseRef = useRef<EventSource | null>(null)
 
   // 解析markdown链接的函数
   const renderContentWithLinks = (content: string) => {
@@ -2622,6 +2623,86 @@ function GeneratePageContent() {
   )
 
   // 异步任务相关函数
+  // SSE监听异步任务状态
+  const startSSEListening = (taskId: string) => {
+    console.log(`🔄 建立SSE连接监听任务: ${taskId}`)
+    setIsGenerating(true)
+    setGenerationMode('async')
+
+    // 关闭之前的SSE连接
+    if (sseRef.current) {
+      sseRef.current.close()
+    }
+
+    // 创建EventSource连接
+    const eventSource = new EventSource(`/api/generate-async/${taskId}/stream`)
+
+    eventSource.onopen = () => {
+      console.log('📡 SSE连接已建立')
+    }
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        console.log('📨 收到SSE消息:', data)
+
+        switch (data.type) {
+          case 'connected':
+            console.log('✅ SSE连接确认')
+            break
+
+          case 'status_update':
+            setAsyncProgress(data.progress || 0)
+            console.log(`📊 任务状态: ${data.message}`)
+            break
+
+          case 'progress_update':
+            setAsyncProgress(data.progress || 0)
+            console.log(`📈 进度更新: ${data.message}`)
+            break
+
+          case 'completed':
+            console.log(`✅ 异步任务完成: ${taskId}`)
+            eventSource.close()
+            handleAsyncTaskCompleted({ ...data, taskId, status: 'completed', content: JSON.stringify(data.result) })
+            break
+
+          case 'failed':
+            console.error(`❌ 异步任务失败: ${taskId}`, data.error)
+            eventSource.close()
+            setError(data.message || '生成失败，请重试')
+            setIsGenerating(false)
+            setGenerationMode('streaming')
+            setCurrentTaskId(null)
+            setAsyncTaskId(null)
+            break
+        }
+      } catch (error) {
+        console.error('解析SSE消息失败:', error)
+      }
+    }
+
+    eventSource.onerror = (error) => {
+      console.error('SSE连接错误:', error)
+      eventSource.close()
+
+      // 如果连接断开，回退到轮询模式
+      console.log('🔄 SSE连接失败，回退到轮询模式')
+      startPollingAsyncResult(taskId)
+    }
+
+    // 存储EventSource引用
+    sseRef.current = eventSource
+  }
+
+  // 停止SSE监听
+  const stopSSEListening = () => {
+    if (sseRef.current) {
+      sseRef.current.close()
+      sseRef.current = null
+    }
+  }
+
   const startPollingAsyncResult = (taskId: string) => {
     console.log(`🔄 开始轮询异步任务: ${taskId}`)
 
@@ -2684,6 +2765,9 @@ function GeneratePageContent() {
       clearInterval(pollingInterval)
       setPollingInterval(null)
     }
+
+    // 停止SSE连接
+    stopSSEListening()
   }
 
   const handleAsyncTaskCompleted = (status: TaskStatus) => {
@@ -2836,9 +2920,10 @@ function GeneratePageContent() {
 
       console.log(`📋 异步任务已提交: ${taskId}`)
       setCurrentTaskId(taskId)
+      setAsyncTaskId(taskId)
 
-      // 开始轮询
-      startPollingAsyncResult(taskId)
+      // 建立SSE连接监听任务状态
+      startSSEListening(taskId)
 
     } catch (error) {
       console.error('启动异步生成失败:', error)
