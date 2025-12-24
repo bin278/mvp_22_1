@@ -111,20 +111,32 @@ async function generateInSegments(
       // 调用AI生成这个段落
       const segmentContent = await generateSegment(segment, model, user);
 
-      // 分批发送内容，避免一次性发送太多
-      const words = segmentContent.split(' ');
-      for (let j = 0; j < words.length; j++) {
-        const word = words[j];
+      // 连续发送内容，确保代码显示不中断
+      // 将内容按字符分组发送，每组5-10个字符
+      const chars = segmentContent.split('');
+      const chunkSize = 8; // 每次发送8个字符
+
+      for (let j = 0; j < chars.length; j += chunkSize) {
+        const chunk = chars.slice(j, j + chunkSize).join('');
         const charsData = {
           type: 'chars',
-          chars: word + ' ',
-          segment: i + 1
+          chars: chunk,
+          segment: i + 1,
+          isComplete: false
         };
         controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(charsData)}\n\n`));
 
-        // 小延迟以模拟流式效果
-        await new Promise(resolve => setTimeout(resolve, 10));
+        // 小延迟以模拟流式效果，但保持连续性
+        await new Promise(resolve => setTimeout(resolve, 5));
       }
+
+      // 发送段落完成信号
+      const segmentCompleteData = {
+        type: 'segment_complete',
+        segment: i + 1,
+        total: segments.length
+      };
+      controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(segmentCompleteData)}\n\n`));
 
       fullContent += segmentContent;
 

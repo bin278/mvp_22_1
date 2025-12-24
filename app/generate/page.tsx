@@ -187,6 +187,10 @@ function GeneratePageContent() {
   const [selectedFile, setSelectedFile] = useState<string>("src/App.tsx")
   const [previewUrl, setPreviewUrl] = useState<string>("")
   const [showTips, setShowTips] = useState(false)
+
+  // 分段生成状态
+  const [currentSegment, setCurrentSegment] = useState<number>(0)
+  const [totalSegments, setTotalSegments] = useState<number>(0)
   const [messages, setMessages] = useState<Message[]>([])
   const [previewPrompt, setPreviewPrompt] = useState<string>("")
   const [generationWarning, setGenerationWarning] = useState<string>("")
@@ -695,6 +699,8 @@ function GeneratePageContent() {
     setIsStreaming(true)
     setStreamingCode('')
     setGeneratedProject(null)
+    setCurrentSegment(0)
+    setTotalSegments(0)
 
     // 确保有对话ID，如果没有则创建新对话
     let conversationIdToUse = currentConversationId
@@ -1111,9 +1117,11 @@ function GeneratePageContent() {
         ? 'Failed to generate code. Please try again.'
         : '生成代码失败，请重试。'))
     } finally {
-      setIsGenerating(false)
-      setIsStreaming(false)
-      setAbortController(null)
+    setIsGenerating(false)
+    setIsStreaming(false)
+    setAbortController(null)
+    setCurrentSegment(0)
+    setTotalSegments(0)
     }
   }
 
@@ -1817,7 +1825,12 @@ function GeneratePageContent() {
                               <div className="max-w-[90%] bg-secondary text-secondary-foreground rounded-lg px-3 py-2">
                                 <div className="space-y-2">
                                   <div className="flex items-center justify-between">
-                                    <h4 className="text-sm font-medium">Generating your app...</h4>
+                                    <h4 className="text-sm font-medium">
+                                      {totalSegments > 0
+                                        ? `Generating segment ${currentSegment}/${totalSegments}...`
+                                        : "Generating your app..."
+                                      }
+                                    </h4>
                                     <div className="flex items-center gap-1">
                                       <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
                                       <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
@@ -3044,6 +3057,17 @@ function GeneratePageContent() {
                     codeContainer.scrollTop = codeContainer.scrollHeight
                   }
                 }, 0)
+
+              } else if (parsedData.type === 'segment_start') {
+                console.log(`📝 开始生成第 ${parsedData.segment}/${parsedData.total} 部分`)
+                setCurrentSegment(parsedData.segment)
+                setTotalSegments(parsedData.total)
+                lastDataTime = Date.now()
+
+              } else if (parsedData.type === 'segment_complete') {
+                console.log(`✅ 完成第 ${parsedData.segment}/${parsedData.total} 部分`)
+                setCurrentSegment(parsedData.segment)
+                lastDataTime = Date.now()
 
               } else if (parsedData.type === 'heartbeat') {
                 lastDataTime = Date.now()
