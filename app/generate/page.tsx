@@ -832,13 +832,14 @@ function GeneratePageContent() {
       let reconnectAttempts = 0
       const MAX_RECONNECT = 3
       const CONNECTION_TIMEOUT = 30000 // 30秒无数据视为连接断开
+      let connectionCheckInterval: NodeJS.Timeout | null = null
 
       if (!reader) {
         throw new Error('No response body reader available')
       }
 
       // 连接检测定时器 - 防止生产环境连接中断
-      const connectionCheckInterval = setInterval(() => {
+      connectionCheckInterval = setInterval(() => {
         const timeSinceLastData = Date.now() - lastDataTime
         if (timeSinceLastData > CONNECTION_TIMEOUT) {
           console.warn(`⚠️ 生产环境连接检测: ${Math.round(timeSinceLastData/1000)}秒无数据，可能是网络代理中断`)
@@ -849,7 +850,9 @@ function GeneratePageContent() {
 
             // 取消当前流式请求
             controller.abort()
-            clearInterval(connectionCheckInterval)
+            if (connectionCheckInterval) {
+        clearInterval(connectionCheckInterval)
+      }
 
             // 显示重连提示
             setError(`网络连接不稳定，正在重连 (${reconnectAttempts}/${MAX_RECONNECT})...`)
@@ -865,7 +868,9 @@ function GeneratePageContent() {
             setError('网络连接失败，请检查网络后重试')
             setIsStreaming(false)
             setIsGenerating(false)
-            clearInterval(connectionCheckInterval)
+            if (connectionCheckInterval) {
+        clearInterval(connectionCheckInterval)
+      }
           }
         }
       }, 5000) // 每5秒检查一次连接
@@ -1033,11 +1038,19 @@ function GeneratePageContent() {
       }
 
       // 清理连接检测定时器
-      clearInterval(connectionCheckInterval)
+      if (connectionCheckInterval) {
+        if (connectionCheckInterval) {
+        clearInterval(connectionCheckInterval)
+      }
+      }
 
     } catch (error: any) {
       // 清理连接检测定时器（防止内存泄漏）
-      clearInterval(connectionCheckInterval)
+      if (connectionCheckInterval) {
+        if (connectionCheckInterval) {
+        clearInterval(connectionCheckInterval)
+      }
+      }
 
       if (error.name === 'AbortError') {
         console.log('Generation cancelled by user')
@@ -3001,13 +3014,14 @@ function GeneratePageContent() {
     const decoder = new TextDecoder()
     let streamingCodeBuffer = ''
     let lastDataTime = Date.now()
+    let connectionCheckInterval: NodeJS.Timeout | null = null
 
     if (!reader) {
       throw new Error('No response body reader available')
     }
 
     // 连接检测定时器
-    const connectionCheckInterval = setInterval(() => {
+    connectionCheckInterval = setInterval(() => {
       const timeSinceLastData = Date.now() - lastDataTime
       if (timeSinceLastData > 30000) {
         console.warn(`⚠️ 流式连接检测: ${Math.round(timeSinceLastData/1000)}秒无数据，可能需要切换模式`)
@@ -3018,7 +3032,11 @@ function GeneratePageContent() {
           setGenerationMode('async')
           setIsStreaming(false)
           startAsyncGeneration()
-          clearInterval(connectionCheckInterval)
+          if (connectionCheckInterval) {
+            if (connectionCheckInterval) {
+        clearInterval(connectionCheckInterval)
+      }
+          }
         }
       }
     }, 5000)
@@ -3085,7 +3103,11 @@ function GeneratePageContent() {
                     startPollingAsyncResult(parsedData.asyncTaskId)
                   }
                 }
-                clearInterval(connectionCheckInterval)
+                if (connectionCheckInterval) {
+                  if (connectionCheckInterval) {
+        clearInterval(connectionCheckInterval)
+      }
+                }
                 return // 退出流式处理
 
               } else if (parsedData.type === 'complete') {
@@ -3101,7 +3123,11 @@ function GeneratePageContent() {
                     `✅ 代码生成完成！使用了智能流式模式。`, user?.id || '')
                 }
 
-                clearInterval(connectionCheckInterval)
+                if (connectionCheckInterval) {
+                  if (connectionCheckInterval) {
+        clearInterval(connectionCheckInterval)
+      }
+                }
                 return
               }
 
@@ -3113,7 +3139,9 @@ function GeneratePageContent() {
       }
 
     } finally {
-      clearInterval(connectionCheckInterval)
+      if (connectionCheckInterval) {
+        clearInterval(connectionCheckInterval)
+      }
     }
   }
 }
