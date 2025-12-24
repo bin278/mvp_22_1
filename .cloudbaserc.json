@@ -12,7 +12,8 @@
         "buildCommand": "CLOUDBASE_BUILD=true pnpm build",
         "outputDir": ".next/standalone"
       }
-    }
+    },
+    "timeout": 300
   },
   "hosting": {
     "publicPath": "/",
