@@ -14,40 +14,72 @@ interface GenerationState {
   mode: 'streaming' | 'async'
 }
 
-// 分段生成函数
-function splitComplexPrompt(prompt: string): string[] {
+// 通用分段生成函数
+function splitPromptIntoSegments(prompt: string): string[] {
   const segments: string[] = [];
 
-  // 如果包含多个组件，分割为更小的任务
-  if (prompt.includes('包含') || prompt.includes('包括') || prompt.includes('和') || prompt.includes('以及')) {
-    // 提取主要功能点
-    const parts = prompt.split(/[，,。包含包括和以及]/).filter(p => p.trim().length > 10);
+  // 分析提示内容，决定分割策略
+  const hasMultipleFeatures = prompt.includes('包含') || prompt.includes('包括') ||
+                             prompt.includes('和') || prompt.includes('以及') ||
+                             prompt.includes('功能') || prompt.includes('组件');
 
-    if (parts.length > 1) {
-      // 第一个段落：基础结构
-      segments.push(`${parts[0]}，创建一个基本的页面结构和布局。`);
+  if (hasMultipleFeatures) {
+    // 智能分割：根据功能点分割
+    const parts = prompt.split(/[，,。包含包括和以及功能组件]/).filter(p => p.trim().length > 5);
 
-      // 中间段落：主要功能
-      for (let i = 1; i < Math.min(parts.length, 3); i++) {
-        segments.push(`${parts[0]}，添加${parts[i]}功能。`);
+    if (parts.length >= 2) {
+      // 基础结构段落
+      const basePrompt = parts[0].trim();
+      segments.push(`${basePrompt}，请创建一个基础的组件结构。`);
+
+      // 功能段落
+      for (let i = 1; i < Math.min(parts.length, 4); i++) {
+        const feature = parts[i].trim();
+        if (feature.length > 3) {
+          segments.push(`${basePrompt}，请添加${feature}功能。`);
+        }
       }
 
-      // 最后一个段落：完整集成
-      if (parts.length > 3) {
-        segments.push(`${parts[0]}，集成所有功能并完善样式。`);
+      // 如果功能太多，合并最后几个
+      if (parts.length > 4) {
+        const remainingFeatures = parts.slice(3).join('、');
+        segments.push(`${basePrompt}，请集成${remainingFeatures}等其他功能。`);
       }
     } else {
-      // 如果分割失败，使用原始提示的简化版本
-      segments.push(prompt.substring(0, 200) + '...（简化版）');
-      segments.push(prompt.substring(200) + '（继续完善）');
+      // 简单分割
+      splitSimplePrompt(prompt, segments);
     }
   } else {
-    // 对于简单的复杂提示，创建两个阶段
-    segments.push(prompt + ' - 第一阶段：基础结构');
-    segments.push(prompt + ' - 第二阶段：功能完善');
+    // 简单提示也分割为2-3个段落
+    splitSimplePrompt(prompt, segments);
   }
 
-  return segments;
+  // 确保至少有2个段落，最多不超过5个
+  if (segments.length < 2) {
+    splitSimplePrompt(prompt, segments);
+  }
+
+  return segments.slice(0, 5); // 限制最大段落数
+}
+
+// 简单提示分割函数
+function splitSimplePrompt(prompt: string, segments: string[]): void {
+  const promptLength = prompt.length;
+
+  if (promptLength < 100) {
+    // 短提示：分成2个段落
+    segments.push(`${prompt}，请先创建基础结构。`);
+    segments.push(`${prompt}，请完善功能和样式。`);
+  } else if (promptLength < 200) {
+    // 中等提示：分成2-3个段落
+    segments.push(`${prompt}，第一部分：基础实现。`);
+    segments.push(`${prompt}，第二部分：功能完善。`);
+  } else {
+    // 长提示：分成3个段落
+    segments.push(`${prompt.substring(0, promptLength / 3)}...，第一阶段实现。`);
+    segments.push(`${prompt.substring(promptLength / 3, 2 * promptLength / 3)}...，第二阶段完善。`);
+    segments.push(`${prompt.substring(2 * promptLength / 3)}，第三阶段集成。`);
+  }
 }
 
 // 分段生成处理函数
@@ -77,7 +109,7 @@ async function generateInSegments(
       controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(segmentStartData)}\n\n`));
 
       // 调用AI生成这个段落
-      const segmentContent = await generateSegment(segment, model);
+      const segmentContent = await generateSegment(segment, model, user);
 
       // 分批发送内容，避免一次性发送太多
       const words = segmentContent.split(' ');
@@ -143,7 +175,7 @@ async function generateInSegments(
 }
 
 // 生成单个段落的函数
-async function generateSegment(prompt: string, model: string): Promise<string> {
+async function generateSegment(prompt: string, model: string, user: any): Promise<string> {
   console.log(`🤖 生成段落: ${prompt}`);
 
   try {
@@ -496,21 +528,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 检查提示复杂度，决定是否使用分段生成
-    const promptLength = prompt.length;
-    const estimatedTokens = promptLength * 0.3; // 粗略估算token数量
+    // 全部使用分段生成模式，确保稳定性
+    console.log('🎯 启用分段生成模式（全任务适用）');
 
-    // 如果提示太复杂，强制使用分段生成
-    if (estimatedTokens > 2000 || prompt.includes('完整的') || prompt.includes('系统') || prompt.includes('平台')) {
-      console.log('🎯 复杂任务，启用分段生成模式');
+    // 将所有提示都分割为多个部分
+    const segments = splitPromptIntoSegments(prompt);
+    console.log(`📊 提示已分割为 ${segments.length} 个部分`);
 
-      // 分割提示为更小的部分
-      const segments = splitComplexPrompt(prompt);
-      console.log(`📊 提示已分割为 ${segments.length} 个部分`);
-
-      // 逐步生成每个部分
-      return await generateInSegments(segments, model, conversationId, controller, user);
-    }
+    // 逐步生成每个部分
+    return await generateInSegments(segments, model, conversationId, controller, user);
 
     // 生成任务ID
     const taskId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
