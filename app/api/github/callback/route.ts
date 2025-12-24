@@ -40,21 +40,60 @@ export async function GET(request: NextRequest) {
       throw new Error('GitHub OAuth not configured')
     }
 
-    const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
+    // Helper function to fetch with timeout and retry
+    async function fetchWithRetry(
+      url: string,
+      options: RequestInit,
+      retries = 3,
+      timeout = 10000
+    ): Promise<Response> {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), timeout)
+
+          const response = await fetch(url, {
+            ...options,
+            signal: controller.signal,
+          })
+
+          clearTimeout(timeoutId)
+          return response
+        } catch (error: any) {
+          if (i === retries - 1) {
+            throw error
+          }
+          // Wait before retry (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)))
+          console.log(`Retrying GitHub API call (attempt ${i + 2}/${retries})...`)
+        }
+      }
+      throw new Error('Failed after retries')
+    }
+
+    // Exchange code for access token with retry
+    const tokenResponse = await fetchWithRetry(
+      'https://github.com/login/oauth/access_token',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          client_id: clientId,
+          client_secret: clientSecret,
+          code,
+        }),
       },
-      body: JSON.stringify({
-        client_id: clientId,
-        client_secret: clientSecret,
-        code,
-      }),
-    })
+      3, // 3 retries
+      15000 // 15 second timeout
+    )
 
     if (!tokenResponse.ok) {
-      throw new Error('Failed to exchange code for token')
+      const errorText = await tokenResponse.text()
+      console.error('GitHub token exchange failed:', errorText)
+      throw new Error(`Failed to exchange code for token: ${tokenResponse.status}`)
     }
 
     const tokenData = await tokenResponse.json()
@@ -64,16 +103,23 @@ export async function GET(request: NextRequest) {
       throw new Error('No access token received')
     }
 
-    // Get GitHub user info
-    const userResponse = await fetch('https://api.github.com/user', {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Accept': 'application/vnd.github.v3+json',
+    // Get GitHub user info with retry
+    const userResponse = await fetchWithRetry(
+      'https://api.github.com/user',
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+        },
       },
-    })
+      3, // 3 retries
+      15000 // 15 second timeout
+    )
 
     if (!userResponse.ok) {
-      throw new Error('Failed to fetch GitHub user info')
+      const errorText = await userResponse.text()
+      console.error('GitHub user fetch failed:', errorText)
+      throw new Error(`Failed to fetch GitHub user info: ${userResponse.status}`)
     }
 
     const githubUser = await userResponse.json()
@@ -119,8 +165,19 @@ export async function GET(request: NextRequest) {
     )
   } catch (error: any) {
     console.error('Error handling GitHub callback:', error)
+    
+    // 提供更友好的错误消息
+    let errorMessage = 'GitHub连接失败'
+    if (error.code === 'UND_ERR_CONNECT_TIMEOUT' || error.name === 'AbortError') {
+      errorMessage = 'GitHub连接超时，请稍后重试'
+    } else if (error.message?.includes('timeout')) {
+      errorMessage = 'GitHub连接超时，请稍后重试'
+    } else if (error.message) {
+      errorMessage = error.message
+    }
+    
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin}/generate?github_error=${encodeURIComponent(error.message)}`
+      `${process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin}/generate?github_error=${encodeURIComponent(errorMessage)}`
     )
   }
 }
