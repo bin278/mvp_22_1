@@ -82,108 +82,118 @@ function splitSimplePrompt(prompt: string, segments: string[]): void {
   }
 }
 
-// 分段生成处理函数
-async function generateInSegments(
+// 分段生成处理函数 - 直接使用流式响应
+function generateInSegments(
   segments: string[],
   model: string,
   conversationId: string | undefined,
-  controller: ReadableStreamDefaultController<Uint8Array>,
   user: any
-): Promise<NextResponse> {
+): Response {
   console.log(`🎯 开始分段生成，共 ${segments.length} 个部分`);
 
-  let fullContent = '';
+  const stream = new ReadableStream({
+    async start(controller) {
+      let fullContent = '';
 
-  try {
-    for (let i = 0; i < segments.length; i++) {
-      const segment = segments[i];
-      console.log(`📝 生成第 ${i + 1}/${segments.length} 部分: ${segment.substring(0, 50)}...`);
+      try {
+        for (let i = 0; i < segments.length; i++) {
+          const segment = segments[i];
+          console.log(`📝 生成第 ${i + 1}/${segments.length} 部分: ${segment.substring(0, 50)}...`);
 
-      // 发送分段开始信号
-      const segmentStartData = {
-        type: 'segment_start',
-        segment: i + 1,
-        total: segments.length,
-        prompt: segment
-      };
-      controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(segmentStartData)}\n\n`));
+          // 发送分段开始信号
+          const segmentStartData = {
+            type: 'segment_start',
+            segment: i + 1,
+            total: segments.length,
+            prompt: segment
+          };
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(segmentStartData)}\n\n`));
 
-      // 调用AI生成这个段落
-      const segmentContent = await generateSegment(segment, model, user);
+          // 调用AI生成这个段落
+          const segmentContent = await generateSegment(segment, model, user);
 
-      // 连续发送内容，确保代码显示不中断
-      // 将内容按字符分组发送，每组5-10个字符
-      const chars = segmentContent.split('');
-      const chunkSize = 8; // 每次发送8个字符
+          // 连续发送内容，确保代码显示不中断
+          // 将内容按字符分组发送，每组8个字符
+          const chars = segmentContent.split('');
+          const chunkSize = 8;
 
-      for (let j = 0; j < chars.length; j += chunkSize) {
-        const chunk = chars.slice(j, j + chunkSize).join('');
-        const charsData = {
-          type: 'chars',
-          chars: chunk,
-          segment: i + 1,
-          isComplete: false
+          for (let j = 0; j < chars.length; j += chunkSize) {
+            const chunk = chars.slice(j, j + chunkSize).join('');
+            const charsData = {
+              type: 'chars',
+              chars: chunk,
+              segment: i + 1,
+              isComplete: false
+            };
+            controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(charsData)}\n\n`));
+
+            // 小延迟以模拟流式效果
+            await new Promise(resolve => setTimeout(resolve, 5));
+          }
+
+          // 发送段落完成信号
+          const segmentCompleteData = {
+            type: 'segment_complete',
+            segment: i + 1,
+            total: segments.length
+          };
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(segmentCompleteData)}\n\n`));
+
+          fullContent += segmentContent;
+
+          // 保存到数据库
+          if (conversationId) {
+            await add('conversation_messages', {
+              conversation_id: conversationId,
+              user_id: user.id,
+              content: segment,
+              role: 'user',
+              created_at: new Date()
+            });
+
+            await add('conversation_messages', {
+              conversation_id: conversationId,
+              user_id: user.id,
+              content: segmentContent,
+              role: 'assistant',
+              created_at: new Date()
+            });
+          }
+        }
+
+        // 发送最终完成信号
+        const completeData = {
+          type: 'complete',
+          project: {
+            files: {
+              'generated-code.js': fullContent
+            }
+          }
         };
-        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(charsData)}\n\n`));
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(completeData)}\n\n`));
+        controller.enqueue(new TextEncoder().encode(`data: [DONE]\n\n`));
+        controller.close();
 
-        // 小延迟以模拟流式效果，但保持连续性
-        await new Promise(resolve => setTimeout(resolve, 5));
-      }
-
-      // 发送段落完成信号
-      const segmentCompleteData = {
-        type: 'segment_complete',
-        segment: i + 1,
-        total: segments.length
-      };
-      controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(segmentCompleteData)}\n\n`));
-
-      fullContent += segmentContent;
-
-      // 保存到数据库
-      if (conversationId) {
-        await add('conversation_messages', {
-          conversation_id: conversationId,
-          user_id: user.id,
-          content: segment,
-          role: 'user',
-          created_at: new Date()
-        });
-
-        await add('conversation_messages', {
-          conversation_id: conversationId,
-          user_id: user.id,
-          content: segmentContent,
-          role: 'assistant',
-          created_at: new Date()
-        });
+      } catch (error) {
+        console.error('分段生成失败:', error);
+        const errorData = {
+          type: 'error',
+          error: '分段生成失败，请重试'
+        };
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(errorData)}\n\n`));
+        controller.close();
       }
     }
+  });
 
-    // 发送完成信号
-    const completeData = {
-      type: 'complete',
-      project: {
-        files: {
-          'generated-code.js': fullContent
-        }
-      }
-    };
-    controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(completeData)}\n\n`));
-    controller.enqueue(new TextEncoder().encode(`data: [DONE]\n\n`));
-    controller.close();
-
-  } catch (error) {
-    console.error('分段生成失败:', error);
-    const errorData = {
-      type: 'error',
-      error: '分段生成失败，请重试'
-    };
-    controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(errorData)}\n\n`));
-    controller.close();
-  }
-
-  return new NextResponse(null, { status: 200 });
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  });
+}
 }
 
 // 生成单个段落的函数
@@ -548,7 +558,7 @@ export async function POST(request: NextRequest) {
     console.log(`📊 提示已分割为 ${segments.length} 个部分`);
 
     // 逐步生成每个部分
-    return await generateInSegments(segments, model, conversationId, controller, user);
+    return generateInSegments(segments, model, conversationId, user);
 
     // 生成任务ID
     const taskId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
