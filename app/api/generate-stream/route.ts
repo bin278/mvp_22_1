@@ -14,6 +14,212 @@ interface GenerationState {
   mode: 'streaming' | 'async'
 }
 
+// 分段生成函数
+function splitComplexPrompt(prompt: string): string[] {
+  const segments: string[] = [];
+
+  // 如果包含多个组件，分割为更小的任务
+  if (prompt.includes('包含') || prompt.includes('包括') || prompt.includes('和') || prompt.includes('以及')) {
+    // 提取主要功能点
+    const parts = prompt.split(/[，,。包含包括和以及]/).filter(p => p.trim().length > 10);
+
+    if (parts.length > 1) {
+      // 第一个段落：基础结构
+      segments.push(`${parts[0]}，创建一个基本的页面结构和布局。`);
+
+      // 中间段落：主要功能
+      for (let i = 1; i < Math.min(parts.length, 3); i++) {
+        segments.push(`${parts[0]}，添加${parts[i]}功能。`);
+      }
+
+      // 最后一个段落：完整集成
+      if (parts.length > 3) {
+        segments.push(`${parts[0]}，集成所有功能并完善样式。`);
+      }
+    } else {
+      // 如果分割失败，使用原始提示的简化版本
+      segments.push(prompt.substring(0, 200) + '...（简化版）');
+      segments.push(prompt.substring(200) + '（继续完善）');
+    }
+  } else {
+    // 对于简单的复杂提示，创建两个阶段
+    segments.push(prompt + ' - 第一阶段：基础结构');
+    segments.push(prompt + ' - 第二阶段：功能完善');
+  }
+
+  return segments;
+}
+
+// 分段生成处理函数
+async function generateInSegments(
+  segments: string[],
+  model: string,
+  conversationId: string | undefined,
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  user: any
+): Promise<NextResponse> {
+  console.log(`🎯 开始分段生成，共 ${segments.length} 个部分`);
+
+  let fullContent = '';
+
+  try {
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      console.log(`📝 生成第 ${i + 1}/${segments.length} 部分: ${segment.substring(0, 50)}...`);
+
+      // 发送分段开始信号
+      const segmentStartData = {
+        type: 'segment_start',
+        segment: i + 1,
+        total: segments.length,
+        prompt: segment
+      };
+      controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(segmentStartData)}\n\n`));
+
+      // 调用AI生成这个段落
+      const segmentContent = await generateSegment(segment, model);
+
+      // 分批发送内容，避免一次性发送太多
+      const words = segmentContent.split(' ');
+      for (let j = 0; j < words.length; j++) {
+        const word = words[j];
+        const charsData = {
+          type: 'chars',
+          chars: word + ' ',
+          segment: i + 1
+        };
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(charsData)}\n\n`));
+
+        // 小延迟以模拟流式效果
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+
+      fullContent += segmentContent;
+
+      // 保存到数据库
+      if (conversationId) {
+        await add('conversation_messages', {
+          conversation_id: conversationId,
+          user_id: user.id,
+          content: segment,
+          role: 'user',
+          created_at: new Date()
+        });
+
+        await add('conversation_messages', {
+          conversation_id: conversationId,
+          user_id: user.id,
+          content: segmentContent,
+          role: 'assistant',
+          created_at: new Date()
+        });
+      }
+    }
+
+    // 发送完成信号
+    const completeData = {
+      type: 'complete',
+      project: {
+        files: {
+          'generated-code.js': fullContent
+        }
+      }
+    };
+    controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(completeData)}\n\n`));
+    controller.enqueue(new TextEncoder().encode(`data: [DONE]\n\n`));
+    controller.close();
+
+  } catch (error) {
+    console.error('分段生成失败:', error);
+    const errorData = {
+      type: 'error',
+      error: '分段生成失败，请重试'
+    };
+    controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(errorData)}\n\n`));
+    controller.close();
+  }
+
+  return new NextResponse(null, { status: 200 });
+}
+
+// 生成单个段落的函数
+async function generateSegment(prompt: string, model: string): Promise<string> {
+  console.log(`🤖 生成段落: ${prompt}`);
+
+  try {
+    // 获取模型配置
+    const modelConfig = AVAILABLE_MODELS[model];
+    if (!modelConfig) {
+      throw new Error(`Unsupported model: ${model}`);
+    }
+
+    // 初始化AI客户端
+    let client: OpenAI;
+    let apiKey: string;
+
+    switch (modelConfig.provider) {
+      case 'deepseek':
+        apiKey = process.env.DEEPSEEK_API_KEY!;
+        client = new OpenAI({
+          apiKey: apiKey,
+          baseURL: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+        });
+        break;
+      case 'zhipu':
+        apiKey = process.env.GLM_API_KEY!;
+        client = new OpenAI({
+          apiKey: apiKey,
+          baseURL: process.env.GLM_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4/',
+        });
+        break;
+      default:
+        throw new Error(`Unsupported provider: ${modelConfig.provider}`);
+    }
+
+    // 调用AI API
+    const completion = await client.chat.completions.create({
+      model: model,
+      messages: [
+        {
+          role: 'system',
+          content: '你是一个专业的前端开发工程师，请根据用户需求生成高质量的React代码。'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      max_tokens: Math.min(modelConfig.maxTokens, 2000), // 限制段落长度
+      temperature: 0.7,
+      stream: false // 分段生成不使用流式
+    });
+
+    const content = completion.choices[0]?.message?.content || '';
+    console.log(`✅ 段落生成完成，长度: ${content.length}`);
+
+    return content;
+
+  } catch (error) {
+    console.error('段落生成失败:', error);
+    // 返回简化版本作为后备
+    return `
+// 段落生成失败，返回简化版本
+// 提示: ${prompt}
+
+function FallbackComponent() {
+  return (
+    <div className="fallback">
+      <h2>组件生成中...</h2>
+      <p>正在处理：${prompt.substring(0, 50)}...</p>
+    </div>
+  );
+}
+
+export default FallbackComponent;
+`;
+  }
+}
+
 // 全局状态存储（生产环境应该用Redis）
 const generationStates = new Map<string, GenerationState>()
 
@@ -288,6 +494,22 @@ export async function POST(request: NextRequest) {
         { error: 'Prompt is required' },
         { status: 400 }
       )
+    }
+
+    // 检查提示复杂度，决定是否使用分段生成
+    const promptLength = prompt.length;
+    const estimatedTokens = promptLength * 0.3; // 粗略估算token数量
+
+    // 如果提示太复杂，强制使用分段生成
+    if (estimatedTokens > 2000 || prompt.includes('完整的') || prompt.includes('系统') || prompt.includes('平台')) {
+      console.log('🎯 复杂任务，启用分段生成模式');
+
+      // 分割提示为更小的部分
+      const segments = splitComplexPrompt(prompt);
+      console.log(`📊 提示已分割为 ${segments.length} 个部分`);
+
+      // 逐步生成每个部分
+      return await generateInSegments(segments, model, conversationId, controller, user);
     }
 
     // 生成任务ID

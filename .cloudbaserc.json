@@ -5,7 +5,6 @@
   "region": "ap-guangzhou",
   "framework": {
     "name": "nextjs",
-    "timeout": 600,
     "plugins": {
       "nextjs": {
         "useNodeVersion": "20",
