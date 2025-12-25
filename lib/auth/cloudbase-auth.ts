@@ -85,16 +85,41 @@ export async function verifyToken(token: string): Promise<VerifiedUser | null> {
 
     // 从数据库获取用户信息
     const db = getCloudBaseDatabase();
-    const userResult = await db.collection(CloudBaseCollections.USERS)
-      .where({ _id: decoded.userId })
-      .get();
+    let user;
 
-    if (!userResult.data || userResult.data.length === 0) {
-      console.warn(`[JWT] User not found: ${decoded.userId}`);
+    try {
+      // 首先尝试通过doc()方法查询（CloudBase推荐的方式）
+      const userDoc = await db.collection(CloudBaseCollections.USERS)
+        .doc(decoded.userId)
+        .get();
+
+      if (userDoc.data && userDoc.data.length > 0) {
+        user = userDoc.data[0];
+        console.log(`[JWT] User found via doc(): ${user.email || user._id}`);
+      } else {
+        // 如果doc()查询失败，尝试where()查询
+        console.log(`[JWT] doc() query failed, trying where() query for userId: ${decoded.userId}`);
+        const userResult = await db.collection(CloudBaseCollections.USERS)
+          .where({ _id: decoded.userId })
+          .get();
+
+        if (!userResult.data || userResult.data.length === 0) {
+          console.warn(`[JWT] User not found: ${decoded.userId}`);
+          return null;
+        }
+
+        user = userResult.data[0];
+        console.log(`[JWT] User found via where(): ${user.email || user._id}`);
+      }
+    } catch (error) {
+      console.error(`[JWT] Database query error for userId ${decoded.userId}:`, error);
       return null;
     }
 
-    const user = userResult.data[0];
+    if (!user) {
+      console.warn(`[JWT] User not found: ${decoded.userId}`);
+      return null;
+    }
 
     return {
       id: user._id,

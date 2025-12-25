@@ -127,7 +127,7 @@ export async function requireAuth(request: NextRequest): Promise<AuthResult> {
           };
         }
 
-        console.log("生产环境：验证token...");
+        console.log(`生产环境：验证token (长度: ${token.length}, 前缀: ${token.substring(0, 10)}...)`);
         let verifiedUser = null;
 
         // 首先尝试验证Session token（邮箱登录）
@@ -142,14 +142,25 @@ export async function requireAuth(request: NextRequest): Promise<AuthResult> {
         // 如果Session token验证失败，尝试JWT token（微信登录）
         if (!verifiedUser) {
           console.log("尝试验证JWT token...");
-          verifiedUser = await verifyToken(token);
-          if (verifiedUser) {
-            console.log(`✅ JWT token验证成功，用户: ${verifiedUser.email || verifiedUser.id}`);
+          try {
+            verifiedUser = await verifyToken(token);
+            if (verifiedUser) {
+              console.log(`✅ JWT token验证成功，用户: ${verifiedUser.email || verifiedUser.id}`);
+            } else {
+              console.log("❌ JWT token验证返回null");
+            }
+          } catch (error) {
+            console.error("JWT token验证异常:", error.message);
           }
         }
 
         if (!verifiedUser) {
           console.warn("生产环境：所有token验证失败");
+          console.warn("Token详情:", {
+            length: token.length,
+            startsWithSession: token.startsWith('session_'),
+            prefix: token.substring(0, 20) + '...'
+          });
           return {
             success: false,
             error: "无效的认证令牌"
