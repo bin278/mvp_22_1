@@ -287,7 +287,7 @@ function GeneratePageContent() {
       }
     }
   }, [authSession?.accessToken])
-
+  
   // Conversation management
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
@@ -746,7 +746,7 @@ function GeneratePageContent() {
       timestamp: new Date()
     }
     setMessages(prev => [...prev, userMessage])
-
+    
     // 保存用户消息到数据库
     console.log('💾 Saving user message to conversation:', conversationIdToUse)
     await saveMessageToConversation(conversationIdToUse, 'user', trimmedPrompt)
@@ -1134,9 +1134,9 @@ function GeneratePageContent() {
         ? 'Failed to generate code. Please try again.'
         : '生成代码失败，请重试。'))
     } finally {
-    setIsGenerating(false)
-    setIsStreaming(false)
-    setAbortController(null)
+      setIsGenerating(false)
+      setIsStreaming(false)
+      setAbortController(null)
     setCurrentSegment(0)
     setTotalSegments(0)
     }

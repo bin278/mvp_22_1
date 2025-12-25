@@ -92,44 +92,58 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 异步启动AI生成（脱离当前请求链路）
-    setTimeout(async () => {
-      try {
-        // 更新任务状态为处理中
-        await tasksCollection.where({ taskId }).update({ status: 'processing' })
+    // 调用云函数异步处理AI生成
+    try {
+      console.log('☁️ 调用云函数generateCodeTask...')
 
-        // 调用AI生成代码（这里使用你现有的AI逻辑）
-        const generatedCode = await generateCodeWithAI(prompt)
+      // 获取CloudBase配置
+      const tencentCloudConfig = {
+        secretId: process.env.TENCENT_CLOUD_SECRET_ID,
+        secretKey: process.env.TENCENT_CLOUD_SECRET_KEY,
+        envId: process.env.TENCENT_CLOUD_ENV_ID || 'cloud1-3gn61ziydcfe6a57'
+      }
 
-        // 将代码分割成片段进行增量存储
-        const codeFragments = splitCodeIntoFragments(generatedCode)
+      // 动态导入CloudBase SDK（避免在所有请求中加载）
+      const { default: cloudbase } = await import('@cloudbase/node-sdk')
 
-        let fullCode = ''
-        // 逐个生成片段，增量更新数据库
-        for (const fragment of codeFragments) {
-          fullCode += fragment
-          // 增量更新数据库的code字段
-          await tasksCollection.where({ taskId }).update({ code: fullCode })
-          // 模拟AI生成速度（实际替换为AI API耗时）
-          await new Promise(resolve => setTimeout(resolve, 300))
-        }
+      const app = cloudbase.init(tencentCloudConfig)
+      const functions = app.functions
 
-        // 生成完成，更新状态和完成时间
-        await tasksCollection.where({ taskId }).update({
-          status: 'success',
-          finishTime: new Date()
-        })
-      } catch (err: any) {
-        console.error('AI生成失败:', err)
-        // 生成失败，记录错误
+      console.log('🚀 调用云函数，参数:', { taskId, prompt: prompt.substring(0, 50) + '...', openid })
+
+      // 调用云函数
+      const result = await functions.callFunction('generateCodeTask', {
+        taskId,
+        prompt,
+        openid
+      })
+
+      console.log('☁️ 云函数调用结果:', result)
+
+      if (result.code !== 0) {
+        console.error('❌ 云函数执行失败:', result)
+        // 更新任务状态为失败
         await tasksCollection.where({ taskId }).update({
           status: 'failed',
           code: '',
           finishTime: new Date(),
-          errorMsg: err.message
+          errorMsg: result.msg || '云函数执行失败'
         })
+      } else {
+        console.log('✅ 云函数执行成功')
       }
-    }, 0)
+
+    } catch (cloudFunctionError: any) {
+      console.error('❌ 云函数调用失败:', cloudFunctionError)
+
+      // 更新任务状态为失败
+      await tasksCollection.where({ taskId }).update({
+        status: 'failed',
+        code: '',
+        finishTime: new Date(),
+        errorMsg: `云函数调用失败: ${cloudFunctionError.message}`
+      })
+    }
 
     // 同步返回TaskID（<1秒完成）
     return NextResponse.json({
