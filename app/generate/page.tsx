@@ -751,6 +751,9 @@ function GeneratePageContent() {
     console.log('💾 Saving user message to conversation:', conversationIdToUse)
     await saveMessageToConversation(conversationIdToUse, 'user', trimmedPrompt)
 
+    // 使用伪流式方案：创建任务+轮询
+    await startPseudoStreaming(trimmedPrompt, conversationIdToUse)
+
     try {
       // 先使用测试API检查连接
       console.log('🧪 Testing API connectivity...')
@@ -2957,6 +2960,191 @@ function GeneratePageContent() {
       setError('启动异步生成失败，请重试')
       setIsGenerating(false)
       setGenerationMode('streaming')
+    }
+  }
+
+  // 伪流式生成（创建任务+轮询）
+  const startPseudoStreaming = async (prompt: string, conversationId: string) => {
+    console.log('🎯 启动伪流式生成（创建任务+轮询）')
+
+    try {
+      // 1. 创建代码生成任务（<1秒返回，无超时风险）
+      console.log('🚀 创建代码生成任务...')
+      const createTaskResponse = await fetch('/api/create-code-task', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authSession?.accessToken}`,
+        },
+        body: JSON.stringify({ prompt }),
+        signal: abortController?.signal
+      })
+
+      if (!createTaskResponse.ok) {
+        throw new Error(`创建任务失败: ${createTaskResponse.status}`)
+      }
+
+      const createTaskResult = await createTaskResponse.json()
+      if (createTaskResult.code !== 0) {
+        throw new Error(createTaskResult.msg || '创建任务失败')
+      }
+
+      const { taskId } = createTaskResult.data
+      console.log('✅ 任务创建成功，TaskID:', taskId)
+
+      // 2. 启动轮询查询最新代码
+      await startPolling(taskId, conversationId)
+
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('用户取消生成')
+        return
+      }
+
+      console.error('伪流式生成失败:', error)
+
+      // 设置错误状态
+      setError(error.message || '生成失败，请重试')
+      setIsGenerating(false)
+      setIsStreaming(false)
+    }
+  }
+
+  // 轮询查询任务状态和代码
+  const startPolling = async (taskId: string, conversationId: string) => {
+    let renderedCode = '' // 已渲染的代码
+    let pollTimer: NodeJS.Timeout | null = null
+    let pollCount = 0
+    const MAX_POLLS = 300 // 最多轮询5分钟（300次 * 1秒）
+
+    const poll = async () => {
+      try {
+        pollCount++
+        console.log(`🔍 第${pollCount}次轮询，查询TaskID: ${taskId}`)
+
+        const response = await fetch(`/api/query-code-task?taskId=${taskId}`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${authSession?.accessToken}`,
+          },
+          signal: abortController?.signal
+        })
+
+        if (!response.ok) {
+          throw new Error(`查询任务失败: ${response.status}`)
+        }
+
+        const result = await response.json()
+        if (result.code !== 0) {
+          throw new Error(result.msg || '查询任务失败')
+        }
+
+        const { code: latestCode, status, errorMsg } = result.data
+
+        // 处理不同状态
+        if (status === 'success') {
+          // 生成完成，渲染最后增量，停止轮询
+          await renderIncrementalCode(latestCode, renderedCode)
+          console.log('✅ 生成完成！')
+
+          // 保存AI回复到对话
+          const aiMessage: Message = {
+            id: Date.now().toString(),
+            role: 'assistant',
+            content: '代码生成完成！',
+            timestamp: new Date()
+          }
+          setMessages(prev => [...prev, aiMessage])
+          await saveMessageToConversation(conversationId, 'assistant', '代码生成完成！')
+
+          // 保存文件到对话
+          const files = { 'generated-code.js': latestCode }
+          await saveFilesToConversation(conversationId, files)
+
+          // 设置生成的项目
+          const project: GeneratedProject = {
+            files: files,
+            timestamp: new Date()
+          }
+          setGeneratedProject(project)
+
+          setIsGenerating(false)
+          setIsStreaming(false)
+          if (pollTimer) clearInterval(pollTimer)
+
+        } else if (status === 'failed') {
+          // 生成失败
+          console.error('❌ 生成失败:', errorMsg)
+          setError(`生成失败: ${errorMsg}`)
+          setIsGenerating(false)
+          setIsStreaming(false)
+          if (pollTimer) clearInterval(pollTimer)
+
+        } else if (status === 'processing') {
+          // 生成中，仅渲染新增的代码片段
+          await renderIncrementalCode(latestCode, renderedCode)
+          renderedCode = latestCode
+
+          // 继续轮询
+          pollTimer = setTimeout(poll, 1000) // 1秒后继续轮询
+
+        } else {
+          // 其他状态，继续轮询
+          pollTimer = setTimeout(poll, 1000)
+        }
+
+        // 防止无限轮询
+        if (pollCount >= MAX_POLLS) {
+          console.warn('⚠️ 轮询超时，停止生成')
+          setError('生成超时，请重试')
+          setIsGenerating(false)
+          setIsStreaming(false)
+          if (pollTimer) clearInterval(pollTimer)
+        }
+
+      } catch (error: any) {
+        if (error.name === 'AbortError') {
+          console.log('用户取消轮询')
+          return
+        }
+
+        console.error('轮询失败:', error)
+
+        // 网络错误时重试（最多重试3次）
+        if (pollCount < MAX_POLLS) {
+          console.log('🔄 轮询失败，3秒后重试...')
+          setTimeout(poll, 3000)
+        } else {
+          setError('网络连接失败，请重试')
+          setIsGenerating(false)
+          setIsStreaming(false)
+        }
+      }
+    }
+
+    // 开始第一次轮询
+    poll()
+  }
+
+  // 增量渲染代码（模拟打字机效果）
+  const renderIncrementalCode = async (latestCode: string, renderedCode: string) => {
+    // 计算新增的代码片段
+    const incrementalCode = latestCode.slice(renderedCode.length)
+
+    if (incrementalCode) {
+      console.log(`📝 渲染增量代码: ${incrementalCode.length} 字符`)
+
+      // 打字机效果：逐字符追加
+      let i = 0
+      const typeTimer = setInterval(() => {
+        if (i < incrementalCode.length) {
+          const char = incrementalCode[i]
+          setStreamingCode(prev => prev + char)
+          i++
+        } else {
+          clearInterval(typeTimer)
+        }
+      }, 20) // 打字机速度（毫秒/字符）
     }
   }
 
