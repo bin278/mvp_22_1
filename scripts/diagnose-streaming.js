@@ -380,3 +380,4 @@ runDiagnostic().catch(error => {
   console.error('诊断脚本执行失败:', error);
   process.exit(1);
 });
+

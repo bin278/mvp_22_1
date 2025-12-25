@@ -97,3 +97,4 @@ console.log('1. 设置好环境变量后，重启开发服务器');
 console.log('2. 访问 http://localhost:3000/api/env 测试API');
 console.log('3. 检查浏览器控制台是否还有环境变量错误');
 console.log('4. 尝试进行代码生成测试SSE系统\n');
+

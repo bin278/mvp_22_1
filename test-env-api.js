@@ -3,7 +3,7 @@ async function testEnvAPI() {
   console.log('=== 测试 /api/env 端点 ===\n');
 
   try {
-    const response = await fetch('http://localhost:3000/api/env', {
+    const response = await fetch('http://localhost:3001/api/env', {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -46,4 +46,5 @@ async function testEnvAPI() {
 }
 
 testEnvAPI();
+
 

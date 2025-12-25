@@ -94,3 +94,4 @@ console.log('============');
 console.log(`JWT_SECRET=${hexSecret}`);
 console.log('');
 console.log('📋 已复制上面的密钥，添加到你的环境变量配置中！');
+

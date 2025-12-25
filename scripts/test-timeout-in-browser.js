@@ -278,3 +278,4 @@ console.log('• 无504超时错误 ✅');
 console.log('• SSE心跳持续 ✅');
 console.log('');
 console.log('🎉 如果所有测试都通过，说明CloudBase超时时间已正确设置为600秒！');
+

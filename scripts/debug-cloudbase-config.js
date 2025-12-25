@@ -149,3 +149,4 @@ console.log('3. 重新部署应用');
 console.log('4. 测试 AI 代码生成是否不再超时');
 
 console.log('');
+

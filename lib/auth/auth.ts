@@ -2,7 +2,7 @@
 // 认证相关的工具函数
 
 import { NextRequest } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { createSupabaseClient } from '@/lib/supabase';
 import { verifyToken, verifySessionToken, CloudBaseUser } from './cloudbase-auth';
 
 // 获取认证提供商
@@ -178,6 +178,7 @@ export async function requireAuth(request: NextRequest): Promise<AuthResult> {
       }
     } else {
       // Supabase认证（默认）
+      const supabase = await createSupabaseClient();
       if (!supabase) {
         console.error("Supabase not configured");
         return {

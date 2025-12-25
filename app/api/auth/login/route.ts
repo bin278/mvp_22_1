@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import jwt from 'jsonwebtoken';
 import { getDatabase } from '@/lib/database/cloudbase';
 
 export async function POST(request: NextRequest) {
@@ -51,6 +52,16 @@ export async function POST(request: NextRequest) {
 
     console.log('用户登录成功');
 
+    // 创建JWT token
+    const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret';
+    const tokenPayload = {
+      openid: user._id, // 使用用户ID作为openid
+      email: user.email,
+      exp: Math.floor(Date.now() / 1000) + 3600, // 1小时过期
+    };
+
+    const accessToken = jwt.sign(tokenPayload, JWT_SECRET);
+
     // 返回用户信息（不包含密码）
     const { password: _, ...userWithoutPassword } = user;
 
@@ -58,7 +69,7 @@ export async function POST(request: NextRequest) {
       success: true,
       user: userWithoutPassword,
       session: {
-        accessToken: `session_${user._id}_${Date.now()}`,
+        accessToken: accessToken,
         refreshToken: `refresh_${user._id}_${Date.now()}`,
         accessTokenExpire: Date.now() + 3600000, // 1小时
         refreshTokenExpire: Date.now() + 2592000000, // 30天

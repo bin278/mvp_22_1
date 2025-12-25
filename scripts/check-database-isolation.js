@@ -179,3 +179,4 @@ checkDatabaseIsolation().catch(error => {
   console.error('检查过程中发生错误:', error);
   process.exit(1);
 });
+

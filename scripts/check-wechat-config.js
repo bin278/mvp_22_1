@@ -121,3 +121,4 @@ console.log('   5. 复制域名 (类似: abc123.cloudbaseapp.cn)');
 console.log('   6. 设置 NEXT_PUBLIC_APP_URL=https://你的域名.cloudbaseapp.cn');
 
 console.log('\n================================\n');
+

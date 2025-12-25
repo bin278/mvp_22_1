@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import jwt from 'jsonwebtoken'
-import { cloudbase } from '@/lib/cloudbase'
+import { getDatabase } from '@/lib/database/cloudbase'
 
 interface JWTPayload {
   openid: string
@@ -44,8 +44,19 @@ export async function GET(request: NextRequest) {
     }
 
     // 初始化CloudBase数据库
-    const db = cloudbase.database()
+    console.log('🔗 初始化CloudBase数据库连接...')
+    const db = getDatabase()
+    if (!db) {
+      console.error('❌ CloudBase数据库初始化失败')
+      return NextResponse.json(
+        { code: -1, msg: '数据库连接失败' },
+        { status: 500 }
+      )
+    }
+    console.log('✅ CloudBase数据库连接成功')
+
     const tasksCollection = db.collection('ai_code_tasks')
+    console.log('📋 获取ai_code_tasks集合')
 
     // 核心：按taskId+openid过滤，实现数据隔离
     const taskRes = await tasksCollection

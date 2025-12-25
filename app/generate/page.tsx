@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { useAuth } from "@/lib/auth-context"
-import { supabase } from "@/lib/supabase"
+import { createSupabaseClient } from "@/lib/supabase"
 import type { GeneratedProject } from "@/lib/code-generator"
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
 import { ConversationSidebar } from "@/components/conversation-sidebar"
@@ -860,11 +860,16 @@ function GeneratePageContent() {
             // 显示重连提示
             setError(`网络连接不稳定，正在重连 (${reconnectAttempts}/${MAX_RECONNECT})...`)
 
-            // 短暂延迟后重试
-            setTimeout(() => {
-              console.log('🔄 重新启动流式生成...')
+            // 短暂延迟后切换到伪流式模式重试
+            setTimeout(async () => {
+              console.log('🔄 切换到伪流式模式重试...')
               setError(null) // 清除错误提示
-              handleGenerate() // 递归调用自己重试
+              setGenerationMode('pseudo-streaming')
+              setIsStreaming(false)
+
+              // 使用伪流式方案：创建任务+轮询
+              const trimmedPrompt = prompt.trim()
+              await startPseudoStreaming(trimmedPrompt, conversationIdToUse)
             }, 2000)
           } else {
             console.error('❌ 生产环境重连失败次数过多')
@@ -1040,12 +1045,8 @@ function GeneratePageContent() {
         }
       }
 
-      // 清理连接检测定时器
-      if (connectionCheckInterval) {
-        if (connectionCheckInterval) {
-        clearInterval(connectionCheckInterval)
-      }
-      }
+      // 清理连接检测定时器（已在startPseudoStreaming内部处理）
+      // connectionCheckInterval 在 startPseudoStreaming 函数内部管理
 
     } catch (error: any) {
       // 清理连接检测定时器（防止内存泄漏）
@@ -2074,6 +2075,58 @@ function GeneratePageContent() {
                     </div>
                   </div>
                 </>
+              ) : isGenerating ? (
+                <>
+                  {/* Polling/Async Generation Display */}
+                  <div className="rounded-xl border border-border bg-card overflow-hidden">
+                    <div className="bg-secondary/50 px-4 py-3 border-b border-border flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                        <h2 className="text-lg font-semibold">
+                          {language === "en" ? "Generating Code (Polling)..." : "正在生成代码（轮询中）..."}
+                        </h2>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          console.log('🛑 用户取消轮询模式生成')
+                          // 取消轮询模式
+                          if (asyncTaskId) {
+                            cancelAsyncGeneration()
+                          } else {
+                            // 对于伪流式生成，设置状态并取消
+                            setIsGenerating(false)
+                            setError('用户已取消生成')
+                            // 创建新的abortController并立即取消
+                            const controller = new AbortController()
+                            controller.abort()
+                            setAbortController(controller)
+                          }
+                        }}
+                        className="text-xs"
+                      >
+                        {language === "en" ? "Cancel" : "取消"}
+                      </Button>
+                    </div>
+                    <div className="flex items-center justify-center h-[60vh] bg-[#1e1e1e]">
+                      <div className="text-center">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+                        <p className="text-muted-foreground">
+                          {asyncTaskId
+                            ? (language === "en" ? "Processing complex code generation..." : "正在处理复杂的代码生成...")
+                            : (language === "en" ? "Generating code in background..." : "正在后台生成代码...")
+                          }
+                        </p>
+                        {asyncProgress > 0 && (
+                          <p className="text-sm text-muted-foreground mt-2">
+                            {language === "en" ? `Progress: ${asyncProgress}%` : `进度: ${asyncProgress}%`}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </>
               ) : generatedProject ? (
                 <>
                   {/* Warning Banner */}
@@ -2964,7 +3017,7 @@ function GeneratePageContent() {
   }
 
   // 伪流式生成（创建任务+轮询）
-  const startPseudoStreaming = async (prompt: string, conversationId: string) => {
+  async function startPseudoStreaming(prompt: string, conversationId: string) {
     console.log('🎯 启动伪流式生成（创建任务+轮询）')
 
     try {
@@ -3011,7 +3064,7 @@ function GeneratePageContent() {
   }
 
   // 轮询查询任务状态和代码
-  const startPolling = async (taskId: string, conversationId: string) => {
+  async function startPolling(taskId: string, conversationId: string) {
     let renderedCode = '' // 已渲染的代码
     let pollTimer: NodeJS.Timeout | null = null
     let pollCount = 0
@@ -3021,6 +3074,12 @@ function GeneratePageContent() {
       try {
         pollCount++
         console.log(`🔍 第${pollCount}次轮询，查询TaskID: ${taskId}`)
+
+        // 如果已经停止生成，立即退出
+        if (!isGenerating) {
+          console.log('⚠️ 生成已停止，退出轮询')
+          return
+        }
 
         const response = await fetch(`/api/query-code-task?taskId=${taskId}`, {
           method: 'GET',
@@ -3044,8 +3103,16 @@ function GeneratePageContent() {
         // 处理不同状态
         if (status === 'success') {
           // 生成完成，渲染最后增量，停止轮询
+          console.log(`🎉 任务完成！停止轮询，TaskID: ${taskId}`)
           await renderIncrementalCode(latestCode, renderedCode)
           console.log('✅ 生成完成！')
+
+          // 停止连接检测定时器，防止误触发重连
+          if (connectionCheckInterval) {
+            clearInterval(connectionCheckInterval)
+            connectionCheckInterval = null
+            console.log('🛑 连接检测定时器已停止')
+          }
 
           // 保存AI回复到对话
           const aiMessage: Message = {
@@ -3068,9 +3135,17 @@ function GeneratePageContent() {
           }
           setGeneratedProject(project)
 
+          // 确保停止所有轮询
           setIsGenerating(false)
           setIsStreaming(false)
-          if (pollTimer) clearInterval(pollTimer)
+          if (pollTimer) {
+            clearTimeout(pollTimer)
+            pollTimer = null
+            console.log('🛑 轮询定时器已清除')
+          }
+
+          console.log('🎯 轮询完全停止')
+          return // 确保不再继续执行
 
         } else if (status === 'failed') {
           // 生成失败
@@ -3078,7 +3153,7 @@ function GeneratePageContent() {
           setError(`生成失败: ${errorMsg}`)
           setIsGenerating(false)
           setIsStreaming(false)
-          if (pollTimer) clearInterval(pollTimer)
+          if (pollTimer) clearTimeout(pollTimer)
 
         } else if (status === 'processing') {
           // 生成中，仅渲染新增的代码片段
@@ -3099,7 +3174,7 @@ function GeneratePageContent() {
           setError('生成超时，请重试')
           setIsGenerating(false)
           setIsStreaming(false)
-          if (pollTimer) clearInterval(pollTimer)
+          if (pollTimer) clearTimeout(pollTimer)
         }
 
       } catch (error: any) {
@@ -3127,7 +3202,7 @@ function GeneratePageContent() {
   }
 
   // 增量渲染代码（模拟打字机效果）
-  const renderIncrementalCode = async (latestCode: string, renderedCode: string) => {
+  async function renderIncrementalCode(latestCode: string, renderedCode: string) {
     // 计算新增的代码片段
     const incrementalCode = latestCode.slice(renderedCode.length)
 

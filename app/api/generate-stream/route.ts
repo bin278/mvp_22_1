@@ -552,12 +552,9 @@ export async function POST(request: NextRequest) {
     // 全部使用分段生成模式，确保稳定性
     console.log('🎯 启用分段生成模式（全任务适用）');
 
-    // 将所有提示都分割为多个部分
+    // 将所有提示都分割为多个部分（用于后面的生成逻辑）
     const segments = splitPromptIntoSegments(prompt);
     console.log(`📊 提示已分割为 ${segments.length} 个部分`);
-
-    // 逐步生成每个部分
-    return generateInSegments(segments, model, conversationId, user);
 
     // 生成任务ID
     const taskId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`

@@ -256,3 +256,4 @@ testSmartStreaming().catch(error => {
   console.error('测试脚本执行失败:', error);
   process.exit(1);
 });
+

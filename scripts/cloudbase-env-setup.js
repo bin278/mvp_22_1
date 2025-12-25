@@ -176,3 +176,4 @@ console.log('✅ AI API 密钥有效');
 console.log('');
 
 console.log('🚀 执行完这些步骤后，AI 代码生成就能突破 1 分钟限制了！\n');
+

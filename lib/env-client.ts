@@ -9,6 +9,13 @@ interface PublicEnv {
   NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID?: string
   WECHAT_APP_ID?: string
 
+  // Supabase 配置
+  NEXT_PUBLIC_SUPABASE_URL?: string
+  NEXT_PUBLIC_SUPABASE_ANON_KEY?: string
+
+  // Stripe 配置
+  NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?: string
+
   // 部署环境信息
   DEPLOYMENT_REGION?: string
   NODE_ENV?: string
@@ -62,6 +69,9 @@ async function fetchEnvFromAPI(): Promise<PublicEnv> {
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
     NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID: process.env.NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID || '',
     WECHAT_APP_ID: process.env.WECHAT_APP_ID || '',
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+    NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '',
     DEPLOYMENT_REGION: process.env.DEPLOYMENT_REGION || 'cn',
     NODE_ENV: process.env.NODE_ENV || 'development',
   }
@@ -102,6 +112,9 @@ export function getPublicEnvSync(): PublicEnv {
       NEXT_PUBLIC_APP_URL: 'http://localhost:3000',
       NEXT_PUBLIC_TENCENT_CLOUD_ENV_ID: '',
       WECHAT_APP_ID: '',
+      NEXT_PUBLIC_SUPABASE_URL: '',
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: '',
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: '',
       DEPLOYMENT_REGION: 'cn',
       NODE_ENV: 'development',
     }

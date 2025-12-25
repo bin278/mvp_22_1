@@ -162,3 +162,4 @@ checkEnvironmentVariables().catch(error => {
   console.error('诊断过程中发生错误:', error);
   process.exit(1);
 });
+

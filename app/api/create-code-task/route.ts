@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { v4 as uuidv4 } from 'uuid'
 import jwt from 'jsonwebtoken'
-import { cloudbase } from '@/lib/cloudbase'
+import { randomUUID } from 'crypto'
+import { getDatabase } from '@/lib/database/cloudbase'
 
 interface JWTPayload {
   openid: string
@@ -26,7 +26,9 @@ export async function POST(request: NextRequest) {
     let decoded: JWTPayload
     try {
       decoded = jwt.verify(token, JWT_SECRET) as JWTPayload
+      console.log('JWT验证成功:', decoded)
     } catch (err) {
+      console.error('JWT验证失败:', err.message)
       return NextResponse.json(
         { code: -1, msg: 'Token无效' },
         { status: 401 }
@@ -45,21 +47,42 @@ export async function POST(request: NextRequest) {
     }
 
     // 生成唯一TaskID
-    const taskId = uuidv4()
+    const taskId = randomUUID()
 
     // 初始化CloudBase数据库
-    const db = cloudbase.database()
+    console.log('🔗 初始化CloudBase数据库连接...')
+    const db = getDatabase()
+    if (!db) {
+      console.error('❌ CloudBase数据库初始化失败')
+      return NextResponse.json(
+        { code: -1, msg: '数据库连接失败' },
+        { status: 500 }
+      )
+    }
+    console.log('✅ CloudBase数据库连接成功')
+
     const tasksCollection = db.collection('ai_code_tasks')
+    console.log('📋 获取ai_code_tasks集合')
 
     // 写入数据库，初始状态pending
-    await tasksCollection.add({
-      taskId,
-      openid,
-      prompt,
-      code: '', // 初始代码为空
-      status: 'pending',
-      createTime: new Date()
-    })
+    console.log('💾 写入数据库任务记录...')
+    try {
+      await tasksCollection.add({
+        taskId,
+        openid,
+        prompt,
+        code: '', // 初始代码为空
+        status: 'pending',
+        createTime: new Date()
+      })
+      console.log('✅ 任务记录写入成功，taskId:', taskId)
+    } catch (dbError) {
+      console.error('❌ 数据库写入失败:', dbError)
+      return NextResponse.json(
+        { code: -1, msg: '数据库写入失败' },
+        { status: 500 }
+      )
+    }
 
     // 异步启动AI生成（脱离当前请求链路）
     setTimeout(async () => {

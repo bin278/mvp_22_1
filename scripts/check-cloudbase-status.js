@@ -116,3 +116,4 @@ console.log('4. 测试代码生成');
 console.log('');
 
 console.log('💡 如果问题持续存在，可以查看 CloudBase 的应用日志获取更详细的错误信息。\n');
+
