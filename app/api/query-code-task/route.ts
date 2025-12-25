@@ -3,7 +3,8 @@ import jwt from 'jsonwebtoken'
 import { getDatabase } from '@/lib/database/cloudbase'
 
 interface JWTPayload {
-  openid: string
+  userId?: string
+  openid?: string  // 兼容旧格式
   exp: number
 }
 
@@ -32,7 +33,14 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const { openid } = decoded
+    // 支持userId和openid两种格式（向后兼容）
+    const openid = decoded.userId || decoded.openid
+    if (!openid) {
+      return NextResponse.json(
+        { code: -1, msg: 'Token缺少用户标识' },
+        { status: 401 }
+      )
+    }
     const { searchParams } = new URL(request.url)
     const taskId = searchParams.get('taskId')
 
