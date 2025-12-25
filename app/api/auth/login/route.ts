@@ -52,27 +52,37 @@ export async function POST(request: NextRequest) {
 
     console.log('用户登录成功');
 
-    // 创建JWT token
+    // 创建JWT token（与微信登录保持一致的格式）
     const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret';
     const tokenPayload = {
-      openid: user._id, // 使用用户ID作为openid
+      userId: user._id, // 使用userId字段，与微信登录一致
       email: user.email,
-      exp: Math.floor(Date.now() / 1000) + 3600, // 1小时过期
+      type: 'access', // 添加token类型
+      region: 'CN' // 添加区域信息
     };
 
-    const accessToken = jwt.sign(tokenPayload, JWT_SECRET);
+    const accessToken = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: '1h' });
 
     // 返回用户信息（不包含密码）
     const { password: _, ...userWithoutPassword } = user;
 
+    // 转换用户对象格式，与微信登录保持一致
+    const userForFrontend = {
+      id: user._id, // 将 _id 转换为 id
+      email: user.email,
+      name: user.name,
+      avatar: user.avatar,
+      subscription_plan: user.subscriptionTier === 'pro' ? 'pro' : 'free'
+    };
+
     return NextResponse.json({
       success: true,
-      user: userWithoutPassword,
-      session: {
-        accessToken: accessToken,
-        refreshToken: `refresh_${user._id}_${Date.now()}`,
-        accessTokenExpire: Date.now() + 3600000, // 1小时
-        refreshTokenExpire: Date.now() + 2592000000, // 30天
+      user: userForFrontend,
+      accessToken: accessToken,
+      refreshToken: `refresh_${user._id}_${Date.now()}`,
+      tokenMeta: {
+        accessTokenExpiresIn: 3600, // 1小时（秒）
+        refreshTokenExpiresIn: 2592000 // 30天（秒）
       }
     });
 
