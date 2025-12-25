@@ -205,7 +205,6 @@ function GeneratePageContent() {
   const [asyncTaskId, setAsyncTaskId] = useState<string | null>(null)
   const [generationMode, setGenerationMode] = useState<'streaming' | 'async' | 'hybrid'>('streaming')
   const [asyncProgress, setAsyncProgress] = useState<number>(0)
-  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null)
 
   // 模型选择和订阅状态
   const [selectedModel, setSelectedModel] = useState<string>(getDefaultModel('free'))
@@ -860,16 +859,11 @@ function GeneratePageContent() {
             // 显示重连提示
             setError(`网络连接不稳定，正在重连 (${reconnectAttempts}/${MAX_RECONNECT})...`)
 
-            // 短暂延迟后切换到伪流式模式重试
-            setTimeout(async () => {
-              console.log('🔄 切换到伪流式模式重试...')
-              setError(null) // 清除错误提示
-              setGenerationMode('pseudo-streaming')
+            // 重连失败，设置错误状态
+            setTimeout(() => {
+              setError('网络连接失败，请检查网络后重试')
               setIsStreaming(false)
-
-              // 使用伪流式方案：创建任务+轮询
-              const trimmedPrompt = prompt.trim()
-              await startPseudoStreaming(trimmedPrompt, conversationIdToUse)
+              setIsGenerating(false)
             }, 2000)
           } else {
             console.error('❌ 生产环境重连失败次数过多')
@@ -933,9 +927,6 @@ function GeneratePageContent() {
                   setIsStreaming(false)
                   setAsyncProgress(0)
                   setCurrentTaskId(parsedData.taskId)
-
-                  // 开始轮询异步任务状态
-                  startPollingAsyncResult(parsedData.taskId)
                 }
                 continue
               } else if (parsedData.type === 'async_task_ready') {
@@ -1045,16 +1036,7 @@ function GeneratePageContent() {
         }
       }
 
-      // 清理连接检测定时器（已在startPseudoStreaming内部处理）
-      // connectionCheckInterval 在 startPseudoStreaming 函数内部管理
-
     } catch (error: any) {
-      // 清理连接检测定时器（防止内存泄漏）
-      if (connectionCheckInterval) {
-        if (connectionCheckInterval) {
-        clearInterval(connectionCheckInterval)
-      }
-      }
 
       if (error.name === 'AbortError') {
         console.log('Generation cancelled by user')
@@ -2083,19 +2065,19 @@ function GeneratePageContent() {
                       <div className="flex items-center gap-2">
                         <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
                         <h2 className="text-lg font-semibold">
-                          {language === "en" ? "Generating Code (Polling)..." : "正在生成代码（轮询中）..."}
+                          {language === "en" ? "Generating Code..." : "正在生成代码..."}
                         </h2>
                       </div>
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => {
-                          console.log('🛑 用户取消轮询模式生成')
-                          // 取消轮询模式
+                          console.log('🛑 用户取消生成')
+                          // 取消生成
                           if (asyncTaskId) {
                             cancelAsyncGeneration()
                           } else {
-                            // 对于伪流式生成，设置状态并取消
+                            // 设置状态并取消
                             setIsGenerating(false)
                             setError('用户已取消生成')
                             // 创建新的abortController并立即取消
@@ -2769,9 +2751,9 @@ function GeneratePageContent() {
       console.error('SSE连接错误:', error)
       eventSource.close()
 
-      // 如果连接断开，回退到轮询模式
-      console.log('🔄 SSE连接失败，回退到轮询模式')
-      startPollingAsyncResult(taskId)
+      // SSE连接失败，设置错误状态
+      setError('网络连接失败，请重试')
+      setIsGenerating(false)
     }
 
     // 存储EventSource引用
@@ -2786,72 +2768,6 @@ function GeneratePageContent() {
     }
   }
 
-  const startPollingAsyncResult = (taskId: string) => {
-    console.log(`🔄 开始轮询异步任务: ${taskId}`)
-
-    const poll = async () => {
-      try {
-        const response = await fetch(`/api/generate-async/${taskId}`, {
-          headers: {
-            'Authorization': `Bearer ${authSession?.accessToken || ''}`,
-          },
-        })
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`)
-        }
-
-        const status: TaskStatus = await response.json()
-        setAsyncProgress(status.progress)
-
-        console.log(`📊 异步任务状态: ${status.status}, 进度: ${status.progress}%`)
-
-        if (status.status === 'completed') {
-          // 任务完成，处理结果
-          console.log('✅ 异步任务完成')
-          handleAsyncTaskCompleted(status)
-          stopAsyncPolling()
-
-        } else if (status.status === 'failed') {
-          // 任务失败
-          console.log('❌ 异步任务失败:', status.error)
-          setError(status.error || '异步生成失败')
-          setIsGenerating(false)
-          stopAsyncPolling()
-
-        } else if (status.status === 'running' || status.status === 'pending') {
-          // 继续轮询
-          const nextInterval = status.progress > 50 ? 2000 : 1000
-          setTimeout(poll, nextInterval)
-        } else {
-          // 其他状态（取消等）
-          console.log(`ℹ️ 异步任务状态: ${status.status}`)
-          stopAsyncPolling()
-        }
-
-      } catch (error) {
-        console.error('轮询异步任务失败:', error)
-        // 网络错误时重试
-        setTimeout(poll, 3000)
-      }
-    }
-
-    // 停止之前的轮询
-    stopAsyncPolling()
-
-    // 开始新的轮询
-    poll()
-  }
-
-  const stopAsyncPolling = () => {
-    if (pollingInterval) {
-      clearInterval(pollingInterval)
-      setPollingInterval(null)
-    }
-
-    // 停止SSE连接
-    stopSSEListening()
-  }
 
   const handleAsyncTaskCompleted = (status: TaskStatus) => {
     if (status.result) {
@@ -2864,13 +2780,6 @@ function GeneratePageContent() {
       setCurrentTaskId(null)
       setAsyncTaskId(null)
       setAsyncProgress(0)
-
-      // 保存到对话
-      if (conversationIdToUse) {
-        saveMessageToConversation(conversationIdToUse, 'assistant',
-          `✅ 代码生成完成！使用了智能异步模式以确保稳定性。`, user?.id || '')
-          .catch(error => console.error('保存消息失败:', error))
-      }
 
       // 显示成功消息
       setMessages(prev => [...prev, {
@@ -2903,7 +2812,6 @@ function GeneratePageContent() {
         },
       })
 
-      stopAsyncPolling()
       setIsGenerating(false)
       setGenerationMode('streaming')
       setCurrentTaskId(null)
@@ -2990,7 +2898,7 @@ function GeneratePageContent() {
         body: JSON.stringify({
           prompt: prompt.trim(),
           model: selectedModel,
-          conversationId: conversationIdToUse
+          conversationId: currentConversationId
         }),
       })
 
@@ -3016,223 +2924,7 @@ function GeneratePageContent() {
     }
   }
 
-  // 伪流式生成（创建任务+轮询）
-  async function startPseudoStreaming(prompt: string, conversationId: string) {
-    console.log('🎯 启动伪流式生成（创建任务+轮询）')
 
-    try {
-      // 1. 创建代码生成任务（<1秒返回，无超时风险）
-      console.log('🚀 创建代码生成任务...')
-      const createTaskResponse = await fetch('/api/create-code-task', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authSession?.accessToken}`,
-        },
-        body: JSON.stringify({ prompt }),
-        signal: abortController?.signal
-      })
-
-      console.log(`📤 创建任务响应状态: ${createTaskResponse.status}`)
-
-      if (!createTaskResponse.ok) {
-        const errorText = await createTaskResponse.text()
-        console.log(`❌ 创建任务失败响应: ${errorText}`)
-        throw new Error(`创建任务失败: ${createTaskResponse.status}`)
-      }
-
-      const createTaskResult = await createTaskResponse.json()
-      console.log(`📋 创建任务API响应: ${JSON.stringify(createTaskResult)}`)
-
-      if (createTaskResult.code !== 0) {
-        console.log(`❌ 创建任务业务失败: ${createTaskResult.msg}`)
-        throw new Error(createTaskResult.msg || '创建任务失败')
-      }
-
-      const { taskId } = createTaskResult.data
-      console.log(`✅ 任务创建成功，TaskID: ${taskId}`)
-
-      // 2. 启动轮询查询最新代码
-      console.log(`🚀 启动轮询，TaskID: ${taskId}`)
-      // 注意：这里不等待startPolling完成，因为它是异步轮询
-      startPolling(taskId, conversationId)
-
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.log('用户取消生成')
-        return
-      }
-
-      console.error('伪流式生成失败:', error)
-
-      // 设置错误状态
-      setError(error.message || '生成失败，请重试')
-      setIsGenerating(false)
-      setIsStreaming(false)
-    }
-  }
-
-  // 轮询查询任务状态和代码
-  async function startPolling(taskId: string, conversationId: string) {
-    let renderedCode = '' // 已渲染的代码
-    let pollTimer: NodeJS.Timeout | null = null
-    let pollCount = 0
-    let isPollingActive = true // 本地变量跟踪轮询状态
-    const MAX_POLLS = 300 // 最多轮询5分钟（300次 * 1秒）
-
-    const poll = async () => {
-      try {
-        pollCount++
-        console.log(`🔍 第${pollCount}次轮询，查询TaskID: ${taskId}`)
-
-        // 检查轮询是否应该继续（主要检查本地状态）
-        if (!isPollingActive) {
-          console.log('⚠️ 轮询已停止，退出')
-          return
-        }
-
-        const response = await fetch(`/api/query-code-task?taskId=${taskId}`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${authSession?.accessToken}`,
-          },
-          signal: abortController?.signal
-        })
-
-        if (!response.ok) {
-          throw new Error(`查询任务失败: ${response.status}`)
-        }
-
-        const result = await response.json()
-        console.log(`📡 查询结果: code=${result.code}, msg=${result.msg}`)
-        console.log(`📊 任务状态: ${JSON.stringify(result.data)}`)
-
-        if (result.code !== 0) {
-          console.log(`❌ 查询任务失败: ${result.msg}`)
-          throw new Error(result.msg || '查询任务失败')
-        }
-
-        const { code: latestCode, status, errorMsg } = result.data
-        console.log(`🔄 任务状态: ${status}, 代码长度: ${latestCode?.length || 0}`)
-
-        // 处理不同状态
-        if (status === 'success') {
-          // 生成完成，渲染最后增量，停止轮询
-          console.log(`🎉 任务完成！停止轮询，TaskID: ${taskId}`)
-          await renderIncrementalCode(latestCode, renderedCode)
-          console.log('✅ 生成完成！')
-
-          // 伪流式生成不使用连接检测定时器，无需清理
-
-          // 保存AI回复到对话
-          const aiMessage: Message = {
-            id: Date.now().toString(),
-            role: 'assistant',
-            content: '代码生成完成！',
-            timestamp: new Date()
-          }
-          setMessages(prev => [...prev, aiMessage])
-          await saveMessageToConversation(conversationId, 'assistant', '代码生成完成！')
-
-          // 保存文件到对话
-          const files = { 'generated-code.js': latestCode }
-          await saveFilesToConversation(conversationId, files)
-
-          // 设置生成的项目
-          const project: GeneratedProject = {
-            files: files,
-            timestamp: new Date()
-          }
-          setGeneratedProject(project)
-
-          // 停止轮询
-          isPollingActive = false
-          setIsGenerating(false)
-          setIsStreaming(false)
-          if (pollTimer) {
-            clearTimeout(pollTimer)
-            pollTimer = null
-            console.log('🛑 轮询定时器已清除')
-          }
-
-          console.log('🎯 轮询完全停止')
-          return // 确保不再继续执行
-
-        } else if (status === 'failed') {
-          // 生成失败
-          console.error('❌ 生成失败:', errorMsg)
-          setError(`生成失败: ${errorMsg}`)
-          setIsGenerating(false)
-          setIsStreaming(false)
-          if (pollTimer) clearTimeout(pollTimer)
-
-        } else if (status === 'processing') {
-          // 生成中，仅渲染新增的代码片段
-          await renderIncrementalCode(latestCode, renderedCode)
-          renderedCode = latestCode
-
-          // 继续轮询
-          pollTimer = setTimeout(poll, 1000) // 1秒后继续轮询
-
-        } else {
-          // 其他状态，继续轮询
-          pollTimer = setTimeout(poll, 1000)
-        }
-
-        // 防止无限轮询
-        if (pollCount >= MAX_POLLS) {
-          console.warn('⚠️ 轮询超时，停止生成')
-          setError('生成超时，请重试')
-          setIsGenerating(false)
-          setIsStreaming(false)
-          if (pollTimer) clearTimeout(pollTimer)
-        }
-
-      } catch (error: any) {
-        if (error.name === 'AbortError') {
-          console.log('用户取消轮询')
-          return
-        }
-
-        console.error('轮询失败:', error)
-
-        // 网络错误时重试（最多重试3次）
-        if (pollCount < MAX_POLLS) {
-          console.log('🔄 轮询失败，3秒后重试...')
-          setTimeout(poll, 3000)
-        } else {
-          setError('网络连接失败，请重试')
-          setIsGenerating(false)
-          setIsStreaming(false)
-        }
-      }
-    }
-
-    // 开始第一次轮询
-    poll()
-  }
-
-  // 增量渲染代码（模拟打字机效果）
-  async function renderIncrementalCode(latestCode: string, renderedCode: string) {
-    // 计算新增的代码片段
-    const incrementalCode = latestCode.slice(renderedCode.length)
-
-    if (incrementalCode) {
-      console.log(`📝 渲染增量代码: ${incrementalCode.length} 字符`)
-
-      // 打字机效果：逐字符追加
-      let i = 0
-      const typeTimer = setInterval(() => {
-        if (i < incrementalCode.length) {
-          const char = incrementalCode[i]
-          setStreamingCode(prev => prev + char)
-          i++
-        } else {
-          clearInterval(typeTimer)
-        }
-      }, 20) // 打字机速度（毫秒/字符）
-    }
-  }
 
   // 智能流式生成
   const startSmartStreaming = async () => {
@@ -3248,7 +2940,7 @@ function GeneratePageContent() {
         body: JSON.stringify({
           prompt: prompt.trim(),
           model: selectedModel,
-          conversationId: conversationIdToUse
+          conversationId: currentConversationId
         }),
         signal: abortController?.signal,
       })
@@ -3374,13 +3066,10 @@ function GeneratePageContent() {
 
                   if (parsedData.asyncTaskId) {
                     setAsyncTaskId(parsedData.asyncTaskId)
-                    startPollingAsyncResult(parsedData.asyncTaskId)
                   }
                 }
                 if (connectionCheckInterval) {
-                  if (connectionCheckInterval) {
-        clearInterval(connectionCheckInterval)
-      }
+                  clearInterval(connectionCheckInterval)
                 }
                 return // 退出流式处理
 
@@ -3391,16 +3080,9 @@ function GeneratePageContent() {
                 setIsGenerating(false)
                 setIsStreaming(false)
 
-                // 保存消息
-                if (conversationIdToUse) {
-                  await saveMessageToConversation(conversationIdToUse, 'assistant',
-                    `✅ 代码生成完成！使用了智能流式模式。`, user?.id || '')
-                }
 
                 if (connectionCheckInterval) {
-                  if (connectionCheckInterval) {
-        clearInterval(connectionCheckInterval)
-      }
+                  clearInterval(connectionCheckInterval)
                 }
                 return
               }
