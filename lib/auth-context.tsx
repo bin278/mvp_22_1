@@ -169,8 +169,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const authUser = getAuthUser();
       const isAuth = isAuthenticated();
+      const authState = getStoredAuthState();
 
-      if (authUser && isAuth) {
+      if (authUser && isAuth && authState) {
         console.log('[Auth Context] 认证状态更新：用户已登录');
         // 转换用户数据格式
         const cloudBaseUser = {
