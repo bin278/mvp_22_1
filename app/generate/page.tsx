@@ -3033,17 +3033,24 @@ function GeneratePageContent() {
         signal: abortController?.signal
       })
 
+      console.log(`📤 创建任务响应状态: ${createTaskResponse.status}`)
+
       if (!createTaskResponse.ok) {
+        const errorText = await createTaskResponse.text()
+        console.log(`❌ 创建任务失败响应: ${errorText}`)
         throw new Error(`创建任务失败: ${createTaskResponse.status}`)
       }
 
       const createTaskResult = await createTaskResponse.json()
+      console.log(`📋 创建任务API响应: ${JSON.stringify(createTaskResult)}`)
+
       if (createTaskResult.code !== 0) {
+        console.log(`❌ 创建任务业务失败: ${createTaskResult.msg}`)
         throw new Error(createTaskResult.msg || '创建任务失败')
       }
 
       const { taskId } = createTaskResult.data
-      console.log('✅ 任务创建成功，TaskID:', taskId)
+      console.log(`✅ 任务创建成功，TaskID: ${taskId}`)
 
       // 2. 启动轮询查询最新代码
       await startPolling(taskId, conversationId)
@@ -3094,11 +3101,16 @@ function GeneratePageContent() {
         }
 
         const result = await response.json()
+        console.log(`📡 查询结果: code=${result.code}, msg=${result.msg}`)
+        console.log(`📊 任务状态: ${JSON.stringify(result.data)}`)
+
         if (result.code !== 0) {
+          console.log(`❌ 查询任务失败: ${result.msg}`)
           throw new Error(result.msg || '查询任务失败')
         }
 
         const { code: latestCode, status, errorMsg } = result.data
+        console.log(`🔄 任务状态: ${status}, 代码长度: ${latestCode?.length || 0}`)
 
         // 处理不同状态
         if (status === 'success') {
