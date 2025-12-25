@@ -751,8 +751,8 @@ function GeneratePageContent() {
     console.log('💾 Saving user message to conversation:', conversationIdToUse)
     await saveMessageToConversation(conversationIdToUse, 'user', trimmedPrompt)
 
-    // 使用伪流式方案：创建任务+轮询
-    await startPseudoStreaming(trimmedPrompt, conversationIdToUse)
+    // 直接生成代码并前端打字机效果
+    await startDirectGeneration(trimmedPrompt, conversationIdToUse)
 
     try {
       // 先使用测试API检查连接
@@ -3418,4 +3418,84 @@ function GeneratePageContent() {
       }
     }
   }
+
+  // 直接生成代码并前端打字机效果
+  async function startDirectGeneration(prompt: string, conversationId: string) {
+    console.log('🎯 启动直接AI代码生成（前端打字机效果）')
+
+    try {
+      // 1. 直接调用API生成完整代码
+      console.log('🚀 调用API生成代码...')
+      const response = await fetch('/api/create-code-task', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authSession?.accessToken}`,
+        },
+        body: JSON.stringify({ prompt }),
+        signal: abortController?.signal
+      })
+
+      console.log(`📤 API响应状态: ${response.status}`)
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.log(`❌ API调用失败响应: ${errorText}`)
+        throw new Error(`API调用失败: ${response.status}`)
+      }
+
+      const result = await response.json()
+      console.log(`📋 API响应: ${JSON.stringify(result)}`)
+
+      if (result.code !== 0) {
+        console.log(`❌ 业务失败: ${result.msg}`)
+        throw new Error(result.msg || '生成失败')
+      }
+
+      const { code: generatedCode, codeLength, taskId } = result.data
+      console.log(`✅ 代码生成成功，长度: ${codeLength}字符`)
+
+      // 2. 设置最终结果状态
+      console.log('📝 设置最终结果...')
+      setIsStreaming(false)
+      setStreamingCode('') // 清除流式代码
+      setGeneratedProject({
+        files: {
+          'src/App.tsx': generatedCode
+        },
+        projectName: 'GeneratedApp'
+      })
+      setSelectedFile('src/App.tsx')
+      setIsGenerating(false)
+
+      // 添加AI回复到对话
+      const aiMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: '✅ 代码生成完成！',
+        timestamp: new Date()
+      }
+      setMessages(prev => [...prev, aiMessage])
+
+      // 保存到数据库
+      if (conversationId) {
+        await saveMessageToConversation(conversationId, 'assistant', '代码生成完成！')
+      }
+
+      console.log('🎉 生成完成！')
+
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('用户取消生成')
+        return
+      }
+
+      console.error('生成失败:', error)
+      setError(error.message || '生成失败，请重试')
+      setIsGenerating(false)
+      setIsStreaming(false)
+      setAbortController(null)
+    }
+  }
+
 }

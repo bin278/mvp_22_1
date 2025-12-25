@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/auth';
 import jwt from 'jsonwebtoken';
-import { getCloudBaseDatabase } from '@/lib/database/cloudbase';
+import { getDatabase } from '@/lib/database/cloudbase';
 import { CloudBaseCollections } from '@/lib/database/cloudbase-client';
 
 // 强制动态渲染
@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
         // 尝试查询数据库
         if (decoded.userId) {
           console.log('[Debug Auth] 查询数据库...');
-          const db = getCloudBaseDatabase();
+          const db = getDatabase();
           const userDoc = await db.collection(CloudBaseCollections.USERS)
             .doc(decoded.userId)
             .get();

@@ -57,100 +57,33 @@ export async function POST(request: NextRequest) {
     // 生成唯一TaskID
     const taskId = randomUUID()
 
-    // 初始化CloudBase数据库
-    console.log('🔗 初始化CloudBase数据库连接...')
-    const db = getDatabase()
-    if (!db) {
-      console.error('❌ CloudBase数据库初始化失败')
-      return NextResponse.json(
-        { code: -1, msg: '数据库连接失败' },
-        { status: 500 }
-      )
-    }
-    console.log('✅ CloudBase数据库连接成功')
-
-    const tasksCollection = db.collection('ai_code_tasks')
-    console.log('📋 获取ai_code_tasks集合')
-
-    // 写入数据库，初始状态pending
-    console.log('💾 写入数据库任务记录...')
+    // 直接在API中生成AI代码（避免云函数复杂性）
     try {
-      await tasksCollection.add({
-        taskId,
-        openid,
-        prompt,
-        code: '', // 初始代码为空
-        status: 'pending',
-        createTime: new Date()
+      console.log('🤖 直接调用AI生成代码...')
+
+      // 直接调用AI生成函数
+      const generatedCode = await generateCodeWithAI(prompt)
+      console.log('✅ 代码生成成功，长度:', generatedCode.length)
+
+      return NextResponse.json({
+        code: 0,
+        msg: '代码生成成功',
+        data: {
+          taskId,
+          code: generatedCode,
+          codeLength: generatedCode.length
+        }
       })
-      console.log('✅ 任务记录写入成功，taskId:', taskId)
-    } catch (dbError) {
-      console.error('❌ 数据库写入失败:', dbError)
-      return NextResponse.json(
-        { code: -1, msg: '数据库写入失败' },
-        { status: 500 }
-      )
+
+    } catch (error: any) {
+      console.error('❌ 代码生成失败:', error)
+
+      return NextResponse.json({
+        code: -1,
+        msg: '代码生成失败',
+        error: error.message
+      }, { status: 500 })
     }
-
-    // 调用云函数异步处理AI生成
-    try {
-      console.log('☁️ 调用云函数generateCodeTask...')
-
-      // 获取CloudBase配置
-      const tencentCloudConfig = {
-        secretId: process.env.TENCENT_CLOUD_SECRET_ID,
-        secretKey: process.env.TENCENT_CLOUD_SECRET_KEY,
-        envId: process.env.TENCENT_CLOUD_ENV_ID || 'cloud1-3gn61ziydcfe6a57'
-      }
-
-      // 动态导入CloudBase SDK（避免在所有请求中加载）
-      const { default: cloudbase } = await import('@cloudbase/node-sdk')
-
-      const app = cloudbase.init(tencentCloudConfig)
-      const functions = app.functions
-
-      console.log('🚀 调用云函数，参数:', { taskId, prompt: prompt.substring(0, 50) + '...', openid })
-
-      // 调用云函数
-      const result = await functions.callFunction('generateCodeTask', {
-        taskId,
-        prompt,
-        openid
-      })
-
-      console.log('☁️ 云函数调用结果:', result)
-
-      if (result.code !== 0) {
-        console.error('❌ 云函数执行失败:', result)
-        // 更新任务状态为失败
-        await tasksCollection.where({ taskId }).update({
-          status: 'failed',
-          code: '',
-          finishTime: new Date(),
-          errorMsg: result.msg || '云函数执行失败'
-        })
-      } else {
-        console.log('✅ 云函数执行成功')
-      }
-
-    } catch (cloudFunctionError: any) {
-      console.error('❌ 云函数调用失败:', cloudFunctionError)
-
-      // 更新任务状态为失败
-      await tasksCollection.where({ taskId }).update({
-        status: 'failed',
-        code: '',
-        finishTime: new Date(),
-        errorMsg: `云函数调用失败: ${cloudFunctionError.message}`
-      })
-    }
-
-    // 同步返回TaskID（<1秒完成）
-    return NextResponse.json({
-      code: 0,
-      msg: '任务已启动',
-      data: { taskId }
-    })
 
   } catch (err: any) {
     console.error('创建任务失败:', err)
@@ -233,17 +166,4 @@ export default App;`
     console.error('AI生成失败:', error)
     throw new Error(`AI生成失败: ${error.message}`)
   }
-}
-
-// 将代码分割成片段（用于增量渲染）
-function splitCodeIntoFragments(code: string): string[] {
-  const lines = code.split('\n')
-  const fragments: string[] = []
-
-  for (let i = 0; i < lines.length; i += 2) { // 每2行作为一个片段
-    const fragment = lines.slice(i, i + 2).join('\n') + '\n'
-    fragments.push(fragment)
-  }
-
-  return fragments
 }

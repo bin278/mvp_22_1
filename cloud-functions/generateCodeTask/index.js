@@ -148,15 +148,45 @@ async function generateCodeWithAI(prompt) {
 
 // 分割代码成片段
 function splitCodeIntoFragments(code) {
-  const lines = code.split('\n');
+  // 简化的分割策略：按字符数分割，每片段大约200-300字符
   const fragments = [];
+  const chunkSize = 250; // 每个片段约250字符
 
-  // 每2行作为一个片段
-  for (let i = 0; i < lines.length; i += 2) {
-    const fragment = lines.slice(i, i + 2).join('\n') + '\n';
-    fragments.push(fragment);
+  let currentPos = 0;
+
+  while (currentPos < code.length) {
+    let endPos = Math.min(currentPos + chunkSize, code.length);
+
+    // 尝试在合理的断点处分割
+    if (endPos < code.length) {
+      // 寻找最近的行尾，避免在单词中间分割
+      const searchStart = Math.max(currentPos, endPos - 50);
+      const nextNewline = code.indexOf('\n', searchStart);
+
+      if (nextNewline !== -1 && nextNewline < endPos + 100) {
+        endPos = nextNewline + 1; // 包含换行符
+      }
+    }
+
+    const fragment = code.slice(currentPos, endPos);
+    if (fragment.trim()) {
+      fragments.push(fragment);
+    }
+
+    currentPos = endPos;
   }
 
+  // 如果只有一个片段，把它分成两半，让用户能看到渐进效果
+  if (fragments.length === 1 && fragments[0].length > 100) {
+    const midPoint = Math.floor(fragments[0].length / 2);
+    const firstHalf = fragments[0].slice(0, midPoint);
+    const secondHalf = fragments[0].slice(midPoint);
+
+    fragments.length = 0; // 清空数组
+    fragments.push(firstHalf, secondHalf);
+  }
+
+  console.log(`📦 简化为${fragments.length}个片段，每片段约${Math.round(code.length / fragments.length)}字符`);
   return fragments;
 }
 
