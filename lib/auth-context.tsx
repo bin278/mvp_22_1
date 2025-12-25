@@ -183,10 +183,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         setUser(cloudBaseUser);
         setSession({
-          accessToken: 'managed-by-auth-state-manager',
-          refreshToken: 'managed-by-auth-state-manager',
-          accessTokenExpire: Date.now() + 3600000, // 1小时后
-          refreshTokenExpire: Date.now() + 604800000 // 7天后
+          accessToken: authState.accessToken,
+          refreshToken: authState.refreshToken,
+          accessTokenExpire: Date.now() + (authState.tokenMeta.accessTokenExpiresIn * 1000),
+          refreshTokenExpire: Date.now() + (authState.tokenMeta.refreshTokenExpiresIn * 1000)
         });
       } else {
         console.log('[Auth Context] 认证状态更新：用户未登录');
