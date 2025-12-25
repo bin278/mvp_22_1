@@ -25,9 +25,7 @@ export async function GET(request: NextRequest) {
     const testPayload = {
       userId: 'test-user-123',
       email: 'test@example.com',
-      type: 'access',
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + 3600 // 1小时后过期
+      type: 'access'
     };
 
     let token;
