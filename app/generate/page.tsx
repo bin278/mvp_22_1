@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useRef, flushSync } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Sparkles, Copy, Download, ArrowLeft, Check, Eye, Code2, Keyboard, X, RefreshCw, AlertCircle, Zap, Github } from "lucide-react"
@@ -3052,8 +3052,15 @@ function GeneratePageContent() {
       const { taskId } = createTaskResult.data
       console.log(`✅ 任务创建成功，TaskID: ${taskId}`)
 
-      // 2. 启动轮询查询最新代码
-      await startPolling(taskId, conversationId)
+      // 2. 确保isGenerating状态已更新，然后启动轮询
+      flushSync(() => {
+        // 确保状态同步更新
+        console.log('🔄 同步更新生成状态为true')
+      })
+
+      console.log(`🚀 启动轮询，TaskID: ${taskId}`)
+      // 注意：这里不等待startPolling完成，因为它是异步轮询
+      startPolling(taskId, conversationId)
 
     } catch (error: any) {
       if (error.name === 'AbortError') {
@@ -3075,6 +3082,7 @@ function GeneratePageContent() {
     let renderedCode = '' // 已渲染的代码
     let pollTimer: NodeJS.Timeout | null = null
     let pollCount = 0
+    let isPollingActive = true // 本地变量跟踪轮询状态
     const MAX_POLLS = 300 // 最多轮询5分钟（300次 * 1秒）
 
     const poll = async () => {
@@ -3082,9 +3090,9 @@ function GeneratePageContent() {
         pollCount++
         console.log(`🔍 第${pollCount}次轮询，查询TaskID: ${taskId}`)
 
-        // 如果已经停止生成，立即退出
-        if (!isGenerating) {
-          console.log('⚠️ 生成已停止，退出轮询')
+        // 检查轮询是否应该继续（同时检查组件状态和本地状态）
+        if (!isPollingActive || !isGenerating) {
+          console.log('⚠️ 轮询已停止，退出')
           return
         }
 
@@ -3147,7 +3155,8 @@ function GeneratePageContent() {
           }
           setGeneratedProject(project)
 
-          // 确保停止所有轮询
+          // 停止轮询
+          isPollingActive = false
           setIsGenerating(false)
           setIsStreaming(false)
           if (pollTimer) {
