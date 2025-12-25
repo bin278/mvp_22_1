@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect, useRef, flushSync } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Sparkles, Copy, Download, ArrowLeft, Check, Eye, Code2, Keyboard, X, RefreshCw, AlertCircle, Zap, Github } from "lucide-react"
@@ -3052,12 +3052,7 @@ function GeneratePageContent() {
       const { taskId } = createTaskResult.data
       console.log(`✅ 任务创建成功，TaskID: ${taskId}`)
 
-      // 2. 确保isGenerating状态已更新，然后启动轮询
-      flushSync(() => {
-        // 确保状态同步更新
-        console.log('🔄 同步更新生成状态为true')
-      })
-
+      // 2. 启动轮询查询最新代码
       console.log(`🚀 启动轮询，TaskID: ${taskId}`)
       // 注意：这里不等待startPolling完成，因为它是异步轮询
       startPolling(taskId, conversationId)
@@ -3090,8 +3085,8 @@ function GeneratePageContent() {
         pollCount++
         console.log(`🔍 第${pollCount}次轮询，查询TaskID: ${taskId}`)
 
-        // 检查轮询是否应该继续（同时检查组件状态和本地状态）
-        if (!isPollingActive || !isGenerating) {
+        // 检查轮询是否应该继续（主要检查本地状态）
+        if (!isPollingActive) {
           console.log('⚠️ 轮询已停止，退出')
           return
         }
