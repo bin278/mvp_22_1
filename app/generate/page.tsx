@@ -3122,7 +3122,7 @@ function GeneratePageContent() {
           await renderIncrementalCode(latestCode, renderedCode)
           console.log('✅ 生成完成！')
 
-          // 伪流式生成不需要连接检测定时器
+          // 伪流式生成不使用连接检测定时器，无需清理
 
           // 保存AI回复到对话
           const aiMessage: Message = {
