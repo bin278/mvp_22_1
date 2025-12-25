@@ -227,17 +227,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const result = await signInWithEmail(email, password);
     if (result.success && result.user) {
       setUser(result.user);
-      setSession(result.session);
 
-      // 保存到localStorage以实现持久化登录状态
-      try {
-        localStorage.setItem('cloudbase_user', JSON.stringify(result.user));
-        if (result.session) {
-          localStorage.setItem('cloudbase_session', JSON.stringify(result.session));
-        }
+      // 处理不同的响应格式（兼容微信登录和邮箱登录）
+      let sessionData = result.session;
+      if (!sessionData && result.accessToken) {
+        // 邮箱登录API的响应格式
+        sessionData = {
+          accessToken: result.accessToken,
+          refreshToken: result.refreshToken,
+          accessTokenExpire: Date.now() + (result.tokenMeta?.accessTokenExpiresIn * 1000 || 3600000),
+          refreshTokenExpire: Date.now() + (result.tokenMeta?.refreshTokenExpiresIn * 1000 || 2592000000)
+        };
+      }
+
+      setSession(sessionData);
+
+      // 使用新的认证状态管理器保存认证状态
+      if (sessionData?.accessToken) {
+        const { saveAuthState } = await import('./auth/auth-state-manager');
+        await saveAuthState(
+          sessionData.accessToken,
+          sessionData.refreshToken || '',
+          result.user,
+          result.tokenMeta || { accessTokenExpiresIn: 3600, refreshTokenExpiresIn: 2592000 }
+        );
         console.log('用户认证状态已保存到localStorage');
-      } catch (storageError) {
-        console.error('保存认证状态到localStorage失败:', storageError);
       }
 
       return { error: null };

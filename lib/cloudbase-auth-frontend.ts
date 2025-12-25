@@ -122,7 +122,9 @@ export const signInWithEmail = async (email: string, password: string) => {
     return {
       success: true,
       user: result.user,
-      session: result.session
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      tokenMeta: result.tokenMeta
     };
 
   } catch (error: any) {
