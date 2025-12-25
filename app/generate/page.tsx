@@ -3122,12 +3122,7 @@ function GeneratePageContent() {
           await renderIncrementalCode(latestCode, renderedCode)
           console.log('✅ 生成完成！')
 
-          // 停止连接检测定时器，防止误触发重连
-          if (connectionCheckInterval) {
-            clearInterval(connectionCheckInterval)
-            connectionCheckInterval = null
-            console.log('🛑 连接检测定时器已停止')
-          }
+          // 伪流式生成不需要连接检测定时器
 
           // 保存AI回复到对话
           const aiMessage: Message = {
