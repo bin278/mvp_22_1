@@ -3103,11 +3103,11 @@ function GeneratePageContent() {
 
   // 直接生成代码并前端打字机效果
   async function startDirectGeneration(prompt: string, conversationId: string) {
-    console.log('🎯 启动直接AI代码生成（前端打字机效果）')
+    console.log('🎯 启动异步AI代码生成')
 
     try {
-      // 1. 直接调用API生成完整代码
-      console.log('🚀 调用API生成代码...')
+      // 1. 调用API创建异步任务
+      console.log('🚀 调用API创建代码生成任务...')
       const response = await fetch('/api/create-code-task', {
         method: 'POST',
         headers: {
@@ -3131,40 +3131,15 @@ function GeneratePageContent() {
 
       if (result.code !== 0) {
         console.log(`❌ 业务失败: ${result.msg}`)
-        throw new Error(result.msg || '生成失败')
+        throw new Error(result.msg || '任务创建失败')
       }
 
-      const { code: generatedCode, codeLength, taskId } = result.data
-      console.log(`✅ 代码生成成功，长度: ${codeLength}字符`)
+      const { taskId, status } = result.data
+      console.log(`✅ 任务创建成功，TaskID: ${taskId}, 状态: ${status}`)
 
-      // 2. 设置最终结果状态
-      console.log('📝 设置最终结果...')
-      setIsStreaming(false)
-      setStreamingCode('') // 清除流式代码
-      setGeneratedProject({
-        files: {
-          'src/App.tsx': generatedCode
-        },
-        projectName: 'GeneratedApp'
-      })
-      setSelectedFile('src/App.tsx')
-      setIsGenerating(false)
-
-      // 添加AI回复到对话
-      const aiMessage: Message = {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content: '✅ 代码生成完成！',
-        timestamp: new Date()
-      }
-      setMessages(prev => [...prev, aiMessage])
-
-      // 保存到数据库
-      if (conversationId) {
-        await saveMessageToConversation(conversationId, 'assistant', '代码生成完成！')
-      }
-
-      console.log('🎉 生成完成！')
+      // 2. 轮询等待结果
+      console.log('🔄 开始轮询等待代码生成结果...')
+      await pollForCodeResult(taskId, conversationId)
 
     } catch (error: any) {
       if (error.name === 'AbortError') {
@@ -3178,6 +3153,95 @@ function GeneratePageContent() {
       setIsStreaming(false)
       setAbortController(null)
     }
+  }
+
+  // 轮询获取代码生成结果
+  async function pollForCodeResult(taskId: string, conversationId: string) {
+    const MAX_POLLS = 60 // 最多轮询60次（约30秒）
+    let pollCount = 0
+
+    const poll = async () => {
+      try {
+        pollCount++
+        console.log(`🔍 第${pollCount}次轮询，查询TaskID: ${taskId}`)
+
+        const response = await fetch(`/api/query-code-task?taskId=${taskId}`, {
+          headers: {
+            'Authorization': `Bearer ${authSession?.accessToken}`,
+          },
+          signal: abortController?.signal
+        })
+
+        if (!response.ok) {
+          throw new Error(`查询任务失败: ${response.status}`)
+        }
+
+        const result = await response.json()
+
+        if (result.code !== 0) {
+          throw new Error(result.msg || '查询任务失败')
+        }
+
+        const { code: generatedCode, status, codeLength } = result.data
+        console.log(`📊 任务状态: ${status}, 代码长度: ${codeLength || 0}`)
+
+        if (status === 'completed' && generatedCode) {
+          // 代码生成完成
+          console.log(`✅ 代码生成成功，长度: ${codeLength}字符`)
+
+          // 设置最终结果状态
+          setIsStreaming(false)
+          setStreamingCode('') // 清除流式代码
+          setGeneratedProject({
+            files: {
+              'src/App.tsx': generatedCode
+            },
+            projectName: 'GeneratedApp'
+          })
+          setSelectedFile('src/App.tsx')
+          setIsGenerating(false)
+
+          // 添加AI回复到对话
+          const aiMessage: Message = {
+            id: Date.now().toString(),
+            role: 'assistant',
+            content: '✅ 代码生成完成！',
+            timestamp: new Date()
+          }
+          setMessages(prev => [...prev, aiMessage])
+
+          // 保存到数据库
+          if (conversationId) {
+            await saveMessageToConversation(conversationId, 'assistant', '代码生成完成！')
+          }
+
+          console.log('🎉 生成完成！')
+          return
+
+        } else if (status === 'failed') {
+          throw new Error('代码生成失败')
+        } else if (pollCount >= MAX_POLLS) {
+          throw new Error('代码生成超时，请重试')
+        } else {
+          // 继续轮询
+          setTimeout(poll, 1000) // 1秒后继续轮询
+        }
+
+      } catch (error: any) {
+        if (error.name === 'AbortError') {
+          console.log('用户取消轮询')
+          return
+        }
+
+        console.error('轮询失败:', error)
+        setError(error.message || '生成失败，请重试')
+        setIsGenerating(false)
+        setIsStreaming(false)
+      }
+    }
+
+    // 开始第一次轮询
+    poll()
   }
 
 }

@@ -4,7 +4,7 @@ import { getDatabase } from '@/lib/database/cloudbase'
 
 interface JWTPayload {
   userId?: string
-  openid?: string  // 兼容旧格式
+  openid?: string
   exp: number
 }
 
@@ -26,7 +26,9 @@ export async function GET(request: NextRequest) {
     let decoded: JWTPayload
     try {
       decoded = jwt.verify(token, JWT_SECRET) as JWTPayload
+      console.log('JWT验证成功:', decoded)
     } catch (err) {
+      console.error('JWT验证失败:', err.message)
       return NextResponse.json(
         { code: -1, msg: 'Token无效' },
         { status: 401 }
@@ -41,53 +43,50 @@ export async function GET(request: NextRequest) {
         { status: 401 }
       )
     }
+
+    // 获取查询参数
     const { searchParams } = new URL(request.url)
     const taskId = searchParams.get('taskId')
 
     if (!taskId) {
       return NextResponse.json(
-        { code: -1, msg: 'taskId参数缺失' },
+        { code: -1, msg: '缺少taskId参数' },
         { status: 400 }
       )
     }
 
-    // 初始化CloudBase数据库
-    console.log('🔗 初始化CloudBase数据库连接...')
-    const db = getDatabase()
-    if (!db) {
-      console.error('❌ CloudBase数据库初始化失败')
-      return NextResponse.json(
-        { code: -1, msg: '数据库连接失败' },
-        { status: 500 }
-      )
-    }
-    console.log('✅ CloudBase数据库连接成功')
+    // 查询数据库
+    console.log('🔍 查询任务状态:', taskId)
+    const db = await getDatabase()
 
-    const tasksCollection = db.collection('ai_code_tasks')
-    console.log('📋 获取ai_code_tasks集合')
-
-    // 核心：按taskId+openid过滤，实现数据隔离
-    const taskRes = await tasksCollection
-      .where({ taskId, openid })
-      .field({ code: true, status: true, errorMsg: true, finishTime: true })
+    const tasks = await db.collection('code_generation_tasks')
+      .where({
+        taskId,
+        openid // 确保用户只能查询自己的任务
+      })
       .get()
 
-    if (taskRes.data.length === 0) {
-      return NextResponse.json({
-        code: -1,
-        msg: '任务不存在或无权限访问'
-      })
+    if (!tasks.data || tasks.data.length === 0) {
+      return NextResponse.json(
+        { code: -1, msg: '任务不存在' },
+        { status: 404 }
+      )
     }
 
-    const task = taskRes.data[0]
+    const task = tasks.data[0]
+    console.log('📊 任务状态:', task.status)
 
     return NextResponse.json({
       code: 0,
+      msg: '查询成功',
       data: {
-        code: task.code,
+        taskId: task.taskId,
         status: task.status,
-        errorMsg: task.errorMsg,
-        finishTime: task.finishTime
+        code: task.code || '',
+        codeLength: task.codeLength || 0,
+        error: task.error || null,
+        createdAt: task.createdAt,
+        completedAt: task.completedAt
       }
     })
 

@@ -517,6 +517,7 @@ function formatCodeString(code: string): string {
 
 export async function POST(request: NextRequest) {
   console.log('🚀 Starting streaming code generation request')
+  const startTime = performance.now()
 
   try {
     // 进行用户认证

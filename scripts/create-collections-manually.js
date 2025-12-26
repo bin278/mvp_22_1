@@ -1,6 +1,6 @@
 const cloudbase = require('@cloudbase/node-sdk');
 
-// 初始化CloudBase
+// 初始化CloudBase - 使用环境变量
 const app = cloudbase.init({
   secretId: process.env.TENCENT_CLOUD_SECRET_ID,
   secretKey: process.env.TENCENT_CLOUD_SECRET_KEY,
@@ -16,7 +16,8 @@ async function createCollectionsManually() {
     'payments',
     'conversations',
     'conversation_files',
-    'conversation_messages'
+    'conversation_messages',
+    'code_generation_tasks'
   ];
 
   console.log('需要创建的集合：');

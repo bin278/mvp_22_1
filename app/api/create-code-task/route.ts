@@ -57,21 +57,61 @@ export async function POST(request: NextRequest) {
     // 生成唯一TaskID
     const taskId = randomUUID()
 
-    // 直接在API中生成AI代码（避免云函数复杂性）
+    // 将任务保存到数据库，准备异步处理
     try {
-      console.log('🤖 直接调用AI生成代码...')
+      console.log('💾 保存代码生成任务到数据库...')
 
-      // 直接调用AI生成函数
-      const generatedCode = await generateCodeWithAI(prompt)
-      console.log('✅ 代码生成成功，长度:', generatedCode.length)
+      const db = await getDatabase()
+      await db.collection('code_generation_tasks').add({
+        taskId,
+        openid,
+        prompt: prompt.trim(),
+        status: 'pending',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      })
+
+      console.log('✅ 任务保存成功，准备异步处理')
+
+      // 触发异步代码生成（可以是后台任务或队列）
+      // 这里暂时返回任务ID，客户端通过轮询或WebSocket获取结果
+      setImmediate(async () => {
+        try {
+          console.log('🤖 开始异步AI代码生成...')
+          const generatedCode = await generateCodeWithAI(prompt.trim())
+
+          // 更新数据库状态
+          await db.collection('code_generation_tasks').where({
+            taskId
+          }).update({
+            status: 'completed',
+            code: generatedCode,
+            codeLength: generatedCode.length,
+            completedAt: new Date(),
+            updatedAt: new Date()
+          })
+
+          console.log('✅ 异步代码生成完成')
+        } catch (error: any) {
+          console.error('❌ 异步代码生成失败:', error)
+
+          // 更新错误状态
+          await db.collection('code_generation_tasks').where({
+            taskId
+          }).update({
+            status: 'failed',
+            error: error.message,
+            updatedAt: new Date()
+          })
+        }
+      })
 
       return NextResponse.json({
         code: 0,
-        msg: '代码生成成功',
+        msg: '任务创建成功，代码生成中...',
         data: {
           taskId,
-          code: generatedCode,
-          codeLength: generatedCode.length
+          status: 'processing'
         }
       })
 
