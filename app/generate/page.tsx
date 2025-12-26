@@ -3054,59 +3054,6 @@ function GeneratePageContent() {
     }
   }
 
-  // 同步生成代码，直接等待完成后再显示
-  async function startDirectGeneration(prompt: string, conversationId: string) {
-    console.log('🎯 启动异步AI代码生成')
-
-    try {
-      // 调用异步API生成代码（立即返回任务ID）
-      console.log('🚀 调用异步代码生成API...')
-      const response = await fetch('/api/generate-code-sync', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authSession?.accessToken}`,
-        },
-        body: JSON.stringify({ prompt }),
-        signal: abortController?.signal
-      })
-
-      console.log(`📤 API响应状态: ${response.status}`)
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        console.log(`❌ API调用失败响应: ${errorText}`)
-        throw new Error(`API调用失败: ${response.status}`)
-      }
-
-      const result = await response.json()
-      console.log(`📋 API响应: ${JSON.stringify(result)}`)
-
-      if (result.code !== 0) {
-        console.log(`❌ 业务失败: ${result.msg}`)
-        throw new Error(result.msg || '代码生成失败')
-      }
-
-      const { taskId } = result.data
-      console.log(`📝 任务已创建，ID: ${taskId}`)
-
-      // 开始轮询任务状态
-      await pollTaskStatus(taskId, prompt, conversationId)
-
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.log('用户取消生成')
-        return
-      }
-
-      console.error('生成失败:', error)
-      setError(error.message || '生成失败，请重试')
-      setIsGenerating(false)
-      setIsStreaming(false)
-      setAbortController(null)
-    }
-  }
-
   // 轮询任务状态
   const pollTaskStatus = async (taskId: string, originalPrompt: string, conversationId: string) => {
     console.log('🔄 开始轮询任务状态:', taskId)
@@ -3241,6 +3188,60 @@ function GeneratePageContent() {
       await saveMessageToConversation(conversationId, timeoutMessage)
     }
   }
+
+  // 同步生成代码，直接等待完成后再显示
+  async function startDirectGeneration(prompt: string, conversationId: string) {
+    console.log('🎯 启动异步AI代码生成')
+
+    try {
+      // 调用异步API生成代码（立即返回任务ID）
+      console.log('🚀 调用异步代码生成API...')
+      const response = await fetch('/api/generate-code-sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authSession?.accessToken}`,
+        },
+        body: JSON.stringify({ prompt }),
+        signal: abortController?.signal
+      })
+
+      console.log(`📤 API响应状态: ${response.status}`)
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.log(`❌ API调用失败响应: ${errorText}`)
+        throw new Error(`API调用失败: ${response.status}`)
+      }
+
+      const result = await response.json()
+      console.log(`📋 API响应: ${JSON.stringify(result)}`)
+
+      if (result.code !== 0) {
+        console.log(`❌ 业务失败: ${result.msg}`)
+        throw new Error(result.msg || '代码生成失败')
+      }
+
+      const { taskId } = result.data
+      console.log(`📝 任务已创建，ID: ${taskId}`)
+
+      // 开始轮询任务状态
+      await pollTaskStatus(taskId, prompt, conversationId)
+
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('用户取消生成')
+        return
+      }
+
+      console.error('生成失败:', error)
+      setError(error.message || '生成失败，请重试')
+      setIsGenerating(false)
+      setIsStreaming(false)
+      setAbortController(null)
+    }
+  }
+
 
 
 }
