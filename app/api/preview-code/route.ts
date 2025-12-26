@@ -21,6 +21,8 @@ export async function POST(request: NextRequest) {
       .replace(/export\s+default\s+/g, '')
       .replace(/export\s+/g, '')
       // Remove import statements (we provide everything globally)
+      // Handle multi-line imports first (like { LineChart, Line, ... } from 'recharts')
+      .replace(/import\s*{\s*[\s\S]*?\s*}\s*from\s+['"`][^'"`]*['"`];?/g, '')
       .replace(/import\s+.*?\s+from\s+['"\`]lucide-react['"\`];?\s*\n/g, '')
       .replace(/import\s+.*?\s+from\s+['"\`]react['"\`];?\s*\n/g, '')
       .replace(/import\s+.*?\s+from\s+['"\`]react-dom['"\`];?\s*\n/g, '')
@@ -52,8 +54,10 @@ export async function POST(request: NextRequest) {
       .replace(/\n\s*javascript\s*\n/g, '\n')  // Remove "javascript" on its own line between other lines
       .trim()
 
-    console.log('Original code:', appCode.substring(0, 200) + '...')
-    console.log('Clean code:', cleanCode.substring(0, 200) + '...')
+    console.log('Original code:', appCode.substring(0, 300) + '...')
+    console.log('Clean code:', cleanCode.substring(0, 300) + '...')
+    console.log('Contains Recharts import:', cleanCode.includes('recharts') || appCode.includes('recharts'))
+    console.log('Contains ResponsiveContainer:', cleanCode.includes('ResponsiveContainer'))
     console.log('Clean code full length:', cleanCode.length)
 
     // Ensure the code has a proper App component declaration
@@ -405,6 +409,161 @@ export async function POST(request: NextRequest) {
       const Eye = createIconWrapper('Eye');
       const EyeOff = createIconWrapper('EyeOff');
 
+      // Simple chart components that work without external libraries
+      (function() {
+        // Create simple SVG-based chart components
+        window.ResponsiveContainer = function({ children, width = '100%', height = 300 }) {
+          return React.createElement('div', {
+            style: { width: width, height: height + 'px', position: 'relative' }
+          }, children);
+        };
+
+        window.LineChart = function({ data, children, width = 400, height = 300 }) {
+          // Simple line chart implementation
+          if (!data || !Array.isArray(data) || data.length === 0) {
+            return React.createElement('div', { style: { padding: '20px', textAlign: 'center' } }, 'No data available');
+          }
+
+          const values = data.map(d => d.sales || d.value || 0);
+          const maxValue = values.length > 0 ? Math.max(...values) : 1;
+          const chartWidth = width - 60;
+          const chartHeight = height - 60;
+
+          const points = data.map((d, i) => {
+            const x = 40 + (i * chartWidth) / Math.max(data.length - 1, 1);
+            const y = 40 + chartHeight - ((d.sales || d.value || 0) * chartHeight) / maxValue;
+            return x + ',' + y;
+          }).join(' ');
+
+          return React.createElement('svg', { width: width, height: height },
+            // Grid lines
+            React.createElement('line', { x1: 40, y1: 40, x2: 40, y2: height - 20, stroke: '#e5e7eb', strokeWidth: 1 }),
+            React.createElement('line', { x1: 40, y1: height - 20, x2: width - 20, y2: height - 20, stroke: '#e5e7eb', strokeWidth: 1 }),
+
+            // Line
+            React.createElement('polyline', {
+              points: points,
+              fill: 'none',
+              stroke: '#3b82f6',
+              strokeWidth: 2
+            }),
+
+            // Data points
+            data.map((d, i) => {
+              const x = 40 + (i * chartWidth) / Math.max(data.length - 1, 1);
+              const y = 40 + chartHeight - ((d.sales || d.value || 0) * chartHeight) / maxValue;
+              return React.createElement('circle', {
+                key: i,
+                cx: x,
+                cy: y,
+                r: 4,
+                fill: '#3b82f6'
+              });
+            })
+          );
+        };
+
+        window.BarChart = function({ data, width = 400, height = 300 }) {
+          if (!data || !Array.isArray(data) || data.length === 0) {
+            return React.createElement('div', { style: { padding: '20px', textAlign: 'center' } }, 'No data available');
+          }
+
+          const values = data.map(d => d.sales || d.value || 0);
+          const maxValue = values.length > 0 ? Math.max(...values) : 1;
+          const barWidth = Math.max((width - 80) / data.length, 20);
+          const chartHeight = height - 60;
+
+          return React.createElement('svg', { width: width, height: height },
+            data.map((d, i) => {
+              const barHeight = maxValue > 0 ? ((d.sales || d.value || 0) * chartHeight) / maxValue : 0;
+              const x = 40 + i * barWidth;
+              const y = height - 20 - barHeight;
+
+              return React.createElement('rect', {
+                key: i,
+                x: x,
+                y: y,
+                width: barWidth - 2,
+                height: barHeight,
+                fill: '#10b981'
+              });
+            })
+          );
+        };
+
+        window.PieChart = function({ data, width = 300, height = 300 }) {
+          if (!data || !Array.isArray(data) || data.length === 0) {
+            return React.createElement('div', { style: { padding: '20px', textAlign: 'center' } }, 'No data available');
+          }
+
+          const values = data.map(d => d.value || 0);
+          const total = values.reduce((sum, val) => sum + val, 0);
+
+          if (total === 0) {
+            return React.createElement('div', { style: { padding: '20px', textAlign: 'center' } }, 'No valid data to display');
+          }
+
+          const centerX = width / 2;
+          const centerY = height / 2;
+          const radius = Math.min(width, height) / 2 - 20;
+
+          let currentAngle = -Math.PI / 2; // Start from top
+
+          const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+
+          return React.createElement('svg', { width: width, height: height },
+            data.map((d, i) => {
+              const value = d.value || 0;
+              if (value === 0) return null;
+
+              const angle = (value / total) * 2 * Math.PI;
+              const startAngle = currentAngle;
+              const endAngle = currentAngle + angle;
+
+              const x1 = centerX + radius * Math.cos(startAngle);
+              const y1 = centerY + radius * Math.sin(startAngle);
+              const x2 = centerX + radius * Math.cos(endAngle);
+              const y2 = centerY + radius * Math.sin(endAngle);
+
+              const largeArcFlag = angle > Math.PI ? 1 : 0;
+
+              const pathData = [
+                'M ' + centerX + ' ' + centerY,
+                'L ' + x1 + ' ' + y1,
+                'A ' + radius + ' ' + radius + ' 0 ' + largeArcFlag + ' 1 ' + x2 + ' ' + y2,
+                'Z'
+              ].join(' ');
+
+              currentAngle = endAngle;
+
+              return React.createElement('path', {
+                key: i,
+                d: pathData,
+                fill: colors[i % colors.length],
+                stroke: 'white',
+                strokeWidth: 1
+              });
+            }).filter(Boolean)
+          );
+        };
+
+        // Simple placeholder components for other chart elements
+        window.Line = function() { return null; };
+        window.Bar = function() { return null; };
+        window.Pie = function() { return null; };
+        window.Cell = function() { return null; };
+        window.XAxis = function() { return null; };
+        window.YAxis = function() { return null; };
+        window.CartesianGrid = function() { return null; };
+        window.Tooltip = function() { return null; };
+        window.Legend = function() { return null; };
+
+        console.log('✅ Simple chart components loaded');
+      })();
+
+      // Setup chart components BEFORE Babel compiles the code
+      console.log('🔧 Setting up chart components before Babel compilation...');
+
       // Component code - Babel will compile this automatically
       // Note: Code is embedded directly here, Babel will transform JSX automatically
 
@@ -451,6 +610,12 @@ export async function POST(request: NextRequest) {
           }
         }
       }
+
+      // Test chart components availability
+      console.log('🧪 Testing chart components availability...');
+      console.log('ResponsiveContainer available:', typeof ResponsiveContainer);
+      console.log('LineChart available:', typeof LineChart);
+      console.log('BarChart available:', typeof BarChart);
 
       // After Babel compiles, App should be available
       // Wait for Babel to compile and DOM to be ready

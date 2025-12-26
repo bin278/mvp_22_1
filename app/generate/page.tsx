@@ -12,7 +12,6 @@ import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { useAuth } from "@/lib/auth-context"
-import { createSupabaseClient } from "@/lib/supabase"
 import type { GeneratedProject } from "@/lib/code-generator"
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
 import { ConversationSidebar } from "@/components/conversation-sidebar"
@@ -695,11 +694,7 @@ function GeneratePageContent() {
     const controller = new AbortController()
     setAbortController(controller)
     setIsGenerating(true)
-    setIsStreaming(true)
-    setStreamingCode('')
     setGeneratedProject(null)
-    setCurrentSegment(0)
-    setTotalSegments(0)
 
     // 确保有对话ID，如果没有则创建新对话
     let conversationIdToUse = currentConversationId
@@ -1325,6 +1320,7 @@ function GeneratePageContent() {
     setIsModifying(true)
 
     try {
+      console.log('🔧 调用同步代码修改API...')
       const response = await fetch('/api/modify-code', {
         method: 'POST',
         headers: {
@@ -1333,139 +1329,96 @@ function GeneratePageContent() {
         body: JSON.stringify({
           code: currentCode,
           instruction: modifyInstruction.trim()
-        }),
+        })
+        // 移除signal以避免意外取消
       })
 
+      console.log(`📤 修改API响应状态: ${response.status}`)
+
       if (!response.ok) {
-        throw new Error('Failed to modify code')
+        const errorText = await response.text()
+        console.log(`❌ API调用失败响应: ${errorText}`)
+        throw new Error(`API调用失败: ${response.status}`)
       }
 
-      const reader = response.body?.getReader()
-      const decoder = new TextDecoder()
-      let streamingCodeBuffer = ''
+      const result = await response.json()
+      console.log(`📋 修改API响应: ${JSON.stringify(result)}`)
 
-      if (!reader) {
-        throw new Error('No response body reader available')
+      if (result.code !== 0) {
+        console.log(`❌ 业务失败: ${result.msg}`)
+        const detailedError = new Error(result.msg || '代码修改失败')
+        ;(detailedError as any).details = result.details || result.error
+        ;(detailedError as any).statusCode = 500
+        throw detailedError
       }
 
-      while (true) {
-        const { done, value } = await reader.read()
+      const { code: modifiedCode, codeLength } = result.data
+      console.log(`✅ 代码修改成功，长度: ${codeLength}字符`)
 
-        if (done) {
-          break
+      // Update the project with modified code
+      setGeneratedProject(prev => {
+        if (!prev) return null
+        const updatedFiles = {
+          ...prev.files,
+          [selectedFile]: modifiedCode
         }
 
-        const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split('\n')
+        // 保存修改后的文件到数据库
+        if (currentConversationId) {
+          saveFiles(updatedFiles)
+        }
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6)
+        return {
+          ...prev,
+          files: updatedFiles
+        }
+      })
 
-            if (data === '[DONE]') {
-              break
+      // Reset lastPreviewCode to trigger auto-refresh if live preview is enabled
+      // The useEffect hook will detect the change and auto-refresh
+      if (isLivePreviewEnabled && previewUrl) {
+        setLastPreviewCode('') // Reset to trigger refresh
+      }
+
+      // Update the last AI message with success status
+      const successMessage = language === 'en'
+        ? `✅ Code has been modified successfully${isLivePreviewEnabled && previewUrl ? ' • Preview will refresh automatically' : ''}`
+        : `✅ 代码已根据要求修改完成${isLivePreviewEnabled && previewUrl ? ' • 预览将自动刷新' : ''}`
+
+      setMessages(prev => {
+        const newMessages = [...prev]
+        // Find the last AI message and update it
+        for (let i = newMessages.length - 1; i >= 0; i--) {
+          if (newMessages[i].role === 'assistant') {
+            newMessages[i] = {
+              ...newMessages[i],
+              content: successMessage,
+              timestamp: new Date()
             }
-
-            try {
-              const parsedData = JSON.parse(data)
-
-              if (parsedData.type === 'char') {
-                streamingCodeBuffer += parsedData.char
-                setModifyingCode(streamingCodeBuffer)
-
-                // Auto-scroll
-                setTimeout(() => {
-                  const codeContainer = document.querySelector('.overflow-auto')
-                  if (codeContainer) {
-                    codeContainer.scrollTop = codeContainer.scrollHeight
-                  }
-                }, 0)
-
-              } else if (parsedData.type === 'complete') {
-                const modifiedCode = parsedData.code
-
-                // Update the project with modified code
-                setGeneratedProject(prev => {
-                  if (!prev) return null
-                  const updatedFiles = {
-                    ...prev.files,
-                    [selectedFile]: modifiedCode
-                  }
-                  
-                  // 保存修改后的文件到数据库
-                  if (currentConversationId) {
-                    saveFiles(updatedFiles)
-                  }
-                  
-                  return {
-                    ...prev,
-                    files: updatedFiles
-                  }
-                })
-                
-                // Reset lastPreviewCode to trigger auto-refresh if live preview is enabled
-                // The useEffect hook will detect the change and auto-refresh
-                if (isLivePreviewEnabled && previewUrl) {
-                  setLastPreviewCode('') // Reset to trigger refresh
-                }
-
-                // Update the last AI message with success status
-                const successMessage = language === 'en'
-                  ? `✅ Code has been modified successfully${isLivePreviewEnabled && previewUrl ? ' • Preview will refresh automatically' : ''}`
-                  : `✅ 代码已根据要求修改完成${isLivePreviewEnabled && previewUrl ? ' • 预览将自动刷新' : ''}`
-                
-                setMessages(prev => {
-                  const newMessages = [...prev]
-                  // Find the last AI message and update it
-                  for (let i = newMessages.length - 1; i >= 0; i--) {
-                    if (newMessages[i].role === 'assistant') {
-                      newMessages[i] = {
-                        ...newMessages[i],
-                        content: successMessage,
-                        timestamp: new Date()
-                      }
-                      break
-                    }
-                  }
-                  return newMessages
-                })
-                
-                // 保存AI消息到数据库
-                if (currentConversationId) {
-                  await saveMessage('assistant', successMessage)
-                }
-
-                // Clear modification input and code display
-                setModifyInstruction('')
-                setModifyingCode('')
-
-              } else if (parsedData.type === 'error') {
-                const errorMsg = parsedData.error || 'Modification error occurred'
-                const errorDetails = parsedData.details || errorMsg
-                const statusCode = parsedData.statusCode
-                
-                // Create a more detailed error object
-                const detailedError = new Error(errorMsg)
-                ;(detailedError as any).details = errorDetails
-                ;(detailedError as any).statusCode = statusCode
-                
-                throw detailedError
-              }
-            } catch (parseError) {
-              console.warn('Failed to parse streaming data:', parseError)
-            }
+            break
           }
         }
+        return newMessages
+      })
+
+      // 保存AI消息到数据库
+      if (currentConversationId) {
+        await saveMessage('assistant', successMessage)
       }
+
+      // Clear modification input and code display
+      setModifyInstruction('')
+      setModifyingCode('')
+
+      console.log('🎉 修改完成！')
     } catch (error: any) {
       console.error('Error modifying code:', error)
-      setModifyingCode('') // Clear any partial code on error
 
       // Determine error message based on error type
       let errorMessage = error.message || 'Failed to modify code'
       let errorDetails = error.details || errorMessage
       let alertMessage = ''
-      
+
       if (error.statusCode === 402) {
         errorMessage = language === 'en' 
           ? 'Insufficient API Balance'
@@ -3101,14 +3054,14 @@ function GeneratePageContent() {
     }
   }
 
-  // 直接生成代码并前端打字机效果
+  // 同步生成代码，直接等待完成后再显示
   async function startDirectGeneration(prompt: string, conversationId: string) {
-    console.log('🎯 启动异步AI代码生成')
+    console.log('🎯 启动同步AI代码生成')
 
     try {
-      // 1. 调用API创建异步任务
-      console.log('🚀 调用API创建代码生成任务...')
-      const response = await fetch('/api/create-code-task', {
+      // 直接调用同步API生成代码
+      console.log('🚀 调用同步代码生成API...')
+      const response = await fetch('/api/generate-code-sync', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -3131,15 +3084,38 @@ function GeneratePageContent() {
 
       if (result.code !== 0) {
         console.log(`❌ 业务失败: ${result.msg}`)
-        throw new Error(result.msg || '任务创建失败')
+        throw new Error(result.msg || '代码生成失败')
       }
 
-      const { taskId, status } = result.data
-      console.log(`✅ 任务创建成功，TaskID: ${taskId}, 状态: ${status}`)
+      const { code: generatedCode, codeLength } = result.data
+      console.log(`✅ 代码生成成功，长度: ${codeLength}字符`)
 
-      // 2. 轮询等待结果
-      console.log('🔄 开始轮询等待代码生成结果...')
-      await pollForCodeResult(taskId, conversationId)
+      // 设置最终结果状态
+      setGeneratedProject({
+        files: {
+          'src/App.tsx': generatedCode
+        },
+        projectName: 'GeneratedApp'
+      })
+      setSelectedFile('src/App.tsx')
+      setIsGenerating(false)
+      setIsStreaming(false)
+
+      // 添加AI回复到对话
+      const aiMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: '✅ 代码生成完成！',
+        timestamp: new Date()
+      }
+      setMessages(prev => [...prev, aiMessage])
+
+      // 保存到数据库
+      if (conversationId) {
+        await saveMessageToConversation(conversationId, 'assistant', '代码生成完成！')
+      }
+
+      console.log('🎉 生成完成！')
 
     } catch (error: any) {
       if (error.name === 'AbortError') {
@@ -3155,93 +3131,5 @@ function GeneratePageContent() {
     }
   }
 
-  // 轮询获取代码生成结果
-  async function pollForCodeResult(taskId: string, conversationId: string) {
-    const MAX_POLLS = 60 // 最多轮询60次（约30秒）
-    let pollCount = 0
-
-    const poll = async () => {
-      try {
-        pollCount++
-        console.log(`🔍 第${pollCount}次轮询，查询TaskID: ${taskId}`)
-
-        const response = await fetch(`/api/query-code-task?taskId=${taskId}`, {
-          headers: {
-            'Authorization': `Bearer ${authSession?.accessToken}`,
-          },
-          signal: abortController?.signal
-        })
-
-        if (!response.ok) {
-          throw new Error(`查询任务失败: ${response.status}`)
-        }
-
-        const result = await response.json()
-
-        if (result.code !== 0) {
-          throw new Error(result.msg || '查询任务失败')
-        }
-
-        const { code: generatedCode, status, codeLength } = result.data
-        console.log(`📊 任务状态: ${status}, 代码长度: ${codeLength || 0}`)
-
-        if (status === 'completed' && generatedCode) {
-          // 代码生成完成
-          console.log(`✅ 代码生成成功，长度: ${codeLength}字符`)
-
-          // 设置最终结果状态
-          setIsStreaming(false)
-          setStreamingCode('') // 清除流式代码
-          setGeneratedProject({
-            files: {
-              'src/App.tsx': generatedCode
-            },
-            projectName: 'GeneratedApp'
-          })
-          setSelectedFile('src/App.tsx')
-          setIsGenerating(false)
-
-          // 添加AI回复到对话
-          const aiMessage: Message = {
-            id: Date.now().toString(),
-            role: 'assistant',
-            content: '✅ 代码生成完成！',
-            timestamp: new Date()
-          }
-          setMessages(prev => [...prev, aiMessage])
-
-          // 保存到数据库
-          if (conversationId) {
-            await saveMessageToConversation(conversationId, 'assistant', '代码生成完成！')
-          }
-
-          console.log('🎉 生成完成！')
-          return
-
-        } else if (status === 'failed') {
-          throw new Error('代码生成失败')
-        } else if (pollCount >= MAX_POLLS) {
-          throw new Error('代码生成超时，请重试')
-        } else {
-          // 继续轮询
-          setTimeout(poll, 1000) // 1秒后继续轮询
-        }
-
-      } catch (error: any) {
-        if (error.name === 'AbortError') {
-          console.log('用户取消轮询')
-          return
-        }
-
-        console.error('轮询失败:', error)
-        setError(error.message || '生成失败，请重试')
-        setIsGenerating(false)
-        setIsStreaming(false)
-      }
-    }
-
-    // 开始第一次轮询
-    poll()
-  }
 
 }

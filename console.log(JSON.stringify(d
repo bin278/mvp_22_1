@@ -1,1 +1,0 @@
-'在生产环境浏览器控制台运行: fetch("/api/wechat/config").then(r=,null,2)))'

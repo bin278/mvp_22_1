@@ -35,40 +35,15 @@ export async function POST(request: NextRequest) {
       baseURL: baseUrl,
     })
 
-    // Create streaming response for real-time code modification
-    const stream = new ReadableStream({
-      async start(controller) {
-        let controllerClosed = false
+    console.log('🔄 开始同步AI代码修改...')
 
-        const safeEnqueue = (data: string) => {
-          if (!controllerClosed) {
-            try {
-              controller.enqueue(data)
-            } catch (error) {
-              console.error('Failed to enqueue data:', error)
-              controllerClosed = true
-            }
-          }
-        }
-
-        const safeClose = () => {
-          if (!controllerClosed) {
-            try {
-              controller.close()
-              controllerClosed = true
-            } catch (error) {
-              console.error('Failed to close controller:', error)
-            }
-          }
-        }
-
-        try {
-          const completion = await client.chat.completions.create({
-            model: model,
-            messages: [
-              {
-                role: 'system',
-                content: `You are a code modification assistant. Modify the given React/TypeScript code according to the user's instruction. Return ONLY the modified code, no explanations, no markdown, no JSON structure.
+    try {
+      const completion = await client.chat.completions.create({
+        model: model,
+        messages: [
+          {
+            role: 'system',
+            content: `You are a code modification assistant. Modify the given React/TypeScript code according to the user's instruction. Return ONLY the modified code, no explanations, no markdown, no JSON structure.
 
 Requirements:
 1. Keep the same code structure and formatting style
@@ -81,110 +56,76 @@ Example:
 User code: "function App() { return <div>Hello</div>; }"
 Instruction: "Add a button"
 Response: "function App() { return <div><div>Hello</div><button>Click me</button></div>; }"`
-              },
-              {
-                role: 'user',
-                content: `Current code:\n\`\`\`typescript\n${code}\n\`\`\`\n\nInstruction: ${instruction}\n\nReturn only the modified code:`
-              }
-            ],
-            max_tokens: parseInt(process.env.DEEPSEEK_MAX_TOKENS || '4000'),
-            temperature: parseFloat(process.env.DEEPSEEK_TEMPERATURE || '0.7'),
-            stream: true,
-          })
-
-          let streamedChars = 0
-          let accumulatedContent = ''
-
-          // Stream code modifications in real-time
-          for await (const chunk of completion) {
-            const content = chunk.choices[0]?.delta?.content
-            if (content) {
-              accumulatedContent += content
-
-              // Stream each character for real-time display
-              for (const char of content) {
-                streamedChars++
-
-                const charData = {
-                  type: 'char',
-                  char: char,
-                  totalLength: streamedChars
-                }
-                
-                safeEnqueue(`data: ${JSON.stringify(charData)}\n\n`)
-                
-                // Small delay for visible typewriter effect
-                await new Promise(resolve => setTimeout(resolve, 20))
-              }
-            }
+          },
+          {
+            role: 'user',
+            content: `Current code:\n\`\`\`typescript\n${code}\n\`\`\`\n\nInstruction: ${instruction}\n\nReturn only the modified code:`
           }
+        ],
+        max_tokens: parseInt(process.env.DEEPSEEK_MAX_TOKENS || '4000'),
+        temperature: parseFloat(process.env.DEEPSEEK_TEMPERATURE || '0.7'),
+      })
 
-          // Clean up the modified code
-          let modifiedCode = accumulatedContent.trim()
-
-          // Remove markdown code blocks if present
-          const codeBlockRegex = /```(?:typescript|tsx|jsx|js|ts)?\s*([\s\S]*?)```/
-          const match = modifiedCode.match(codeBlockRegex)
-          if (match) {
-            modifiedCode = match[1].trim()
-          }
-
-          // Send final complete response
-          const finalData = {
-            type: 'complete',
-            code: modifiedCode
-          }
-
-          safeEnqueue(`data: ${JSON.stringify(finalData)}\n\n`)
-          safeEnqueue(`data: [DONE]\n\n`)
-          safeClose()
-
-        } catch (error: any) {
-          console.error('Error modifying code:', error)
-          
-          // Handle specific error types
-          let errorMessage = 'Failed to modify code'
-          let errorDetails = ''
-          
-          if (error?.status === 402 || error?.response?.status === 402) {
-            errorMessage = 'Insufficient API Balance'
-            errorDetails = 'Your API account has insufficient balance. Please top up your account to continue using the service.'
-          } else if (error?.status === 401 || error?.response?.status === 401) {
-            errorMessage = 'Invalid API Key'
-            errorDetails = 'The API key is invalid or expired. Please check your API configuration.'
-          } else if (error?.status === 429 || error?.response?.status === 429) {
-            errorMessage = 'Rate Limit Exceeded'
-            errorDetails = 'Too many requests. Please wait a moment and try again.'
-          } else if (error?.message) {
-            errorMessage = error.message
-            errorDetails = error.message
-          }
-          
-          const errorData = {
-            type: 'error',
-            error: errorMessage,
-            details: errorDetails,
-            statusCode: error?.status || error?.response?.status || 500
-          }
-          safeEnqueue(`data: ${JSON.stringify(errorData)}\n\n`)
-          safeEnqueue(`data: [DONE]\n\n`)
-          safeClose()
-        }
+      // 获取完整响应
+      const content = completion.choices[0]?.message?.content
+      if (!content) {
+        throw new Error('No content generated from AI')
       }
-    })
 
-    return new NextResponse(stream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    })
+      // Clean up the modified code
+      let modifiedCode = content.trim()
+
+      // Remove markdown code blocks if present
+      const codeBlockRegex = /```(?:typescript|tsx|jsx|js|ts)?\s*([\s\S]*?)```/
+      const match = modifiedCode.match(codeBlockRegex)
+      if (match) {
+        modifiedCode = match[1].trim()
+      }
+
+      console.log('✅ 同步代码修改完成')
+
+      return NextResponse.json({
+        code: 0,
+        msg: '代码修改成功',
+        data: {
+          code: modifiedCode,
+          codeLength: modifiedCode.length
+        }
+      })
+
+    } catch (error: any) {
+      console.error('❌ 同步代码修改失败:', error)
+
+      // Handle specific error types
+      let errorMessage = 'Failed to modify code'
+      let errorDetails = ''
+
+      if (error?.status === 402 || error?.response?.status === 402) {
+        errorMessage = 'Insufficient API Balance'
+        errorDetails = 'Your API account has insufficient balance. Please top up your account to continue using the service.'
+      } else if (error?.status === 401 || error?.response?.status === 401) {
+        errorMessage = 'Invalid API Key'
+        errorDetails = 'The API key is invalid or expired. Please check your API configuration.'
+      } else if (error?.status === 429 || error?.response?.status === 429) {
+        errorMessage = 'Rate Limit Exceeded'
+        errorDetails = 'Too many requests. Please wait a moment and try again.'
+      } else if (error?.message) {
+        errorMessage = error.message
+        errorDetails = error.message
+      }
+
+      return NextResponse.json({
+        code: -1,
+        msg: '代码修改失败',
+        error: errorMessage,
+        details: errorDetails
+      }, { status: 500 })
+    }
 
   } catch (error: any) {
     console.error('Error starting code modification:', error)
     return NextResponse.json(
-      { error: 'Failed to start code modification' },
+      { code: -1, msg: '请求处理失败', error: error.message },
       { status: 500 }
     )
   }
