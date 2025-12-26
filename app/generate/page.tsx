@@ -769,8 +769,46 @@ function GeneratePageContent() {
     console.log('💾 Saving user message to conversation:', conversationIdToUse)
     await saveMessageToConversation(conversationIdToUse, 'user', trimmedPrompt)
 
-    // 直接生成代码并前端打字机效果
-    await startDirectGeneration(trimmedPrompt, conversationIdToUse)
+    // 直接使用异步模式生成代码（避免CloudBase超时限制）
+    console.log('🚀 使用异步模式生成代码（避免超时）')
+    setGenerationMode('async')
+    setIsStreaming(false)
+
+    // 直接调用异步生成，传入正确的参数
+    try {
+      const response = await fetch('/api/generate-async', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authSession?.accessToken || ''}`,
+        },
+        body: JSON.stringify({
+          prompt: trimmedPrompt,
+          model: selectedModel,
+          conversationId: conversationIdToUse
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+
+      const result = await response.json()
+      const taskId = result.taskId
+
+      console.log(`📋 异步任务已提交: ${taskId}`)
+      setCurrentTaskId(taskId)
+      setAsyncTaskId(taskId)
+
+      // 建立SSE连接监听任务状态
+      startSSEListening(taskId)
+
+    } catch (error) {
+      console.error('异步生成启动失败:', error)
+      setError('异步生成启动失败，请重试')
+      setIsGenerating(false)
+      setGenerationMode('streaming')
+    }
 
     try {
       // 先使用测试API检查连接
@@ -1803,7 +1841,9 @@ function GeneratePageContent() {
                                 <div className="space-y-2">
                                   <div className="flex items-center justify-between">
                                     <h4 className="text-sm font-medium">
-                                      {totalSegments > 0
+                                      {generationMode === 'async'
+                                        ? (language === 'en' ? 'AI is generating in background...' : 'AI正在后台生成...')
+                                        : totalSegments > 0
                                         ? `Generating segment ${currentSegment}/${totalSegments}...`
                                         : "Generating your app..."
                                       }
@@ -1817,56 +1857,121 @@ function GeneratePageContent() {
 
                                   <div className="flex items-center justify-between">
                                     <div className="text-xs text-muted-foreground">
-                                      This may take 30-60 seconds. Please wait...
+                                      {generationMode === 'async'
+                                        ? (language === 'en' ? 'Background generation in progress...' : '后台生成进行中...')
+                                        : 'This may take 30-60 seconds. Please wait...'
+                                      }
                                     </div>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => {
-                                        if (abortController) {
-                                          abortController.abort()
-                                          setAbortController(null)
-                                          setIsGenerating(false)
-                                        }
-                                      }}
-                                      className="text-xs h-6 px-2"
-                                    >
-                                      Cancel
-                                    </Button>
+                                    {generationMode === 'async' ? (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={cancelAsyncGeneration}
+                                        className="text-xs h-6 px-2"
+                                      >
+                                        {language === 'en' ? 'Cancel' : '取消'}
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                          if (abortController) {
+                                            abortController.abort()
+                                            setAbortController(null)
+                                            setIsGenerating(false)
+                                          }
+                                        }}
+                                        className="text-xs h-6 px-2"
+                                      >
+                                        Cancel
+                                      </Button>
+                                    )}
                                   </div>
 
                                   <div className="space-y-2">
-                                    <div className="flex items-center gap-2">
-                                      <div className="h-2 flex-1 rounded-full bg-secondary-foreground/20 overflow-hidden">
-                                        <div className="h-full bg-accent rounded-full animate-pulse" style={{ width: '65%' }} />
+                                    {generationMode === 'async' ? (
+                                      <div className="flex items-center gap-2">
+                                        <div className="h-2 flex-1 rounded-full bg-secondary-foreground/20 overflow-hidden">
+                                          <div className="h-full bg-accent rounded-full transition-all duration-500" style={{ width: `${asyncProgress || 10}%` }} />
+                                        </div>
+                                        <span className="text-xs font-medium text-accent">{asyncProgress || 10}%</span>
                                       </div>
-                                      <span className="text-xs font-medium text-accent">65%</span>
-                                    </div>
+                                    ) : (
+                                      <div className="flex items-center gap-2">
+                                        <div className="h-2 flex-1 rounded-full bg-secondary-foreground/20 overflow-hidden">
+                                          <div className="h-full bg-accent rounded-full animate-pulse" style={{ width: '65%' }} />
+                                        </div>
+                                        <span className="text-xs font-medium text-accent">65%</span>
+                                      </div>
+                                    )}
 
-                                    <div className="grid grid-cols-3 gap-2 text-center">
-                                      <div className="space-y-1">
-                                        <div className="w-full bg-accent/20 rounded-full h-0.5">
-                                          <div className="bg-accent h-0.5 rounded-full w-full"></div>
+                                    {generationMode === 'async' ? (
+                                      <div className="grid grid-cols-4 gap-2 text-center">
+                                        <div className="space-y-1">
+                                          <div className="w-full bg-accent/20 rounded-full h-0.5">
+                                            <div className={`bg-accent h-0.5 rounded-full transition-all duration-500 ${asyncProgress >= 25 ? 'w-full' : asyncProgress >= 10 ? 'w-1/2' : 'w-0'}`}></div>
+                                          </div>
+                                          <p className="text-xs text-muted-foreground">
+                                            {language === 'en' ? 'Analyzing' : '分析中'}
+                                          </p>
                                         </div>
-                                        <p className="text-xs text-muted-foreground">Analyzing</p>
-                                      </div>
-                                      <div className="space-y-1">
-                                        <div className="w-full bg-accent/20 rounded-full h-0.5">
-                                          <div className="bg-accent h-0.5 rounded-full w-3/4"></div>
+                                        <div className="space-y-1">
+                                          <div className="w-full bg-accent/20 rounded-full h-0.5">
+                                            <div className={`bg-accent h-0.5 rounded-full transition-all duration-500 ${asyncProgress >= 50 ? 'w-full' : asyncProgress >= 25 ? 'w-3/4' : 'w-0'}`}></div>
+                                          </div>
+                                          <p className="text-xs text-muted-foreground">
+                                            {language === 'en' ? 'Generating' : '生成中'}
+                                          </p>
                                         </div>
-                                        <p className="text-xs text-muted-foreground">Generating</p>
-                                      </div>
-                                      <div className="space-y-1">
-                                        <div className="w-full bg-accent/20 rounded-full h-0.5">
-                                          <div className="bg-accent h-0.5 rounded-full w-1/2"></div>
+                                        <div className="space-y-1">
+                                          <div className="w-full bg-accent/20 rounded-full h-0.5">
+                                            <div className={`bg-accent h-0.5 rounded-full transition-all duration-500 ${asyncProgress >= 75 ? 'w-full' : asyncProgress >= 50 ? 'w-1/2' : 'w-0'}`}></div>
+                                          </div>
+                                          <p className="text-xs text-muted-foreground">
+                                            {language === 'en' ? 'Optimizing' : '优化中'}
+                                          </p>
                                         </div>
-                                        <p className="text-xs text-muted-foreground">Optimizing</p>
+                                        <div className="space-y-1">
+                                          <div className="w-full bg-accent/20 rounded-full h-0.5">
+                                            <div className={`bg-accent h-0.5 rounded-full transition-all duration-500 ${asyncProgress >= 100 ? 'w-full' : asyncProgress >= 75 ? 'w-3/4' : 'w-0'}`}></div>
+                                          </div>
+                                          <p className="text-xs text-muted-foreground">
+                                            {language === 'en' ? 'Finalizing' : '完成中'}
+                                          </p>
+                                        </div>
                                       </div>
-                                    </div>
+                                    ) : (
+                                      <div className="grid grid-cols-3 gap-2 text-center">
+                                        <div className="space-y-1">
+                                          <div className="w-full bg-accent/20 rounded-full h-0.5">
+                                            <div className="bg-accent h-0.5 rounded-full w-full"></div>
+                                          </div>
+                                          <p className="text-xs text-muted-foreground">Analyzing</p>
+                                        </div>
+                                        <div className="space-y-1">
+                                          <div className="w-full bg-accent/20 rounded-full h-0.5">
+                                            <div className="bg-accent h-0.5 rounded-full w-3/4"></div>
+                                          </div>
+                                          <p className="text-xs text-muted-foreground">Generating</p>
+                                        </div>
+                                        <div className="space-y-1">
+                                          <div className="w-full bg-accent/20 rounded-full h-0.5">
+                                            <div className="bg-accent h-0.5 rounded-full w-1/2"></div>
+                                          </div>
+                                          <p className="text-xs text-muted-foreground">Optimizing</p>
+                                        </div>
+                                      </div>
+                                    )}
 
                                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                       <Sparkles className="w-3 h-3 animate-spin" />
-                                      <span>Creating components and styling...</span>
+                                      <span>
+                                        {generationMode === 'async'
+                                          ? (language === 'en' ? 'AI working in background...' : 'AI正在后台工作...')
+                                          : 'Creating components and styling...'
+                                        }
+                                      </span>
                                     </div>
                                   </div>
                                 </div>
@@ -2933,13 +3038,13 @@ function GeneratePageContent() {
   }
 
   // 直接异步生成（供复杂度评估调用）
-  const startAsyncGeneration = async () => {
+  const startAsyncGeneration = async (promptText?: string, convId?: string) => {
     try {
       console.log('🚀 启动异步生成模式')
 
-      // 获取当前输入的prompt
-      const currentPrompt = prompt.trim()
-      const currentConversationId = conversationIdToUse
+      // 获取当前输入的prompt和conversationId，支持传入参数
+      const currentPrompt = promptText || prompt.trim()
+      const currentConversationId = convId || currentConversationId || conversationIdToUse
 
       const response = await fetch('/api/generate-async', {
         method: 'POST',
