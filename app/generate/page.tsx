@@ -291,6 +291,136 @@ function GeneratePageContent() {
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
 
+  // 异步任务相关函数
+  // SSE监听异步任务状态
+  const startSSEListening = (taskId: string) => {
+    console.log(`🔄 建立SSE连接监听任务: ${taskId}`)
+    setIsGenerating(true)
+    setGenerationMode('async')
+
+    // 关闭之前的SSE连接
+    if (sseRef.current) {
+      sseRef.current.close()
+    }
+
+    // 创建EventSource连接
+    const eventSource = new EventSource(`/api/generate-async/${taskId}/stream`)
+
+    eventSource.onopen = () => {
+      console.log('📡 SSE连接已建立')
+    }
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        console.log('📨 收到SSE消息:', data)
+
+        switch (data.type) {
+          case 'connected':
+            console.log('✅ SSE连接确认')
+            break
+
+          case 'status_update':
+            setAsyncProgress(data.progress || 0)
+            console.log(`📊 任务状态: ${data.message}`)
+            break
+
+          case 'progress_update':
+            setAsyncProgress(data.progress || 0)
+            console.log(`📈 进度更新: ${data.message}`)
+            break
+
+          case 'completed':
+            console.log(`✅ 异步任务完成: ${taskId}`)
+            eventSource.close()
+            handleAsyncTaskCompleted({ ...data, taskId, status: 'completed', content: JSON.stringify(data.result) })
+            break
+
+          case 'failed':
+            console.error(`❌ 异步任务失败: ${taskId}`, data.error)
+            eventSource.close()
+            setError(data.message || '生成失败，请重试')
+            setIsGenerating(false)
+            setGenerationMode('streaming')
+            setCurrentTaskId(null)
+            setAsyncTaskId(null)
+            break
+        }
+      } catch (error) {
+        console.error('解析SSE消息失败:', error)
+      }
+    }
+
+    eventSource.onerror = (error) => {
+      console.error('SSE连接错误:', error)
+      eventSource.close()
+
+      // SSE连接失败，设置错误状态
+      setError('网络连接失败，请重试')
+      setIsGenerating(false)
+    }
+
+    // 存储EventSource引用
+    sseRef.current = eventSource
+  }
+
+  // 取消异步生成
+  const cancelAsyncGeneration = async () => {
+    if (!asyncTaskId) return
+
+    try {
+      console.log(`🛑 取消异步任务: ${asyncTaskId}`)
+
+      await fetch(`/api/generate-async/${asyncTaskId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${authSession?.accessToken || ''}`,
+        },
+      })
+
+      setIsGenerating(false)
+      setGenerationMode('streaming')
+      setCurrentTaskId(null)
+      setAsyncTaskId(null)
+      setAsyncProgress(0)
+      setError('异步生成已取消')
+
+    } catch (error) {
+      console.error('取消异步任务失败:', error)
+    }
+  }
+
+  // 处理异步任务完成
+  const handleAsyncTaskCompleted = (status: TaskStatus) => {
+    if (status.result) {
+      console.log('📦 处理异步任务结果')
+
+      setGeneratedProject(status.result)
+      setSelectedFile('src/App.tsx')
+      setIsGenerating(false)
+      setGenerationMode('streaming') // 重置为流式模式
+      setCurrentTaskId(null)
+      setAsyncTaskId(null)
+      setAsyncProgress(0)
+
+      // 显示成功消息
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: `✅ 代码生成完成！使用了智能异步模式以确保稳定性。`,
+        timestamp: new Date()
+      }])
+
+      // 自动打开预览
+      if (status.result?.files?.['src/App.tsx']) {
+        setTimeout(() => {
+          setPreviewPrompt(prompt.trim())
+          setIsPreviewLoading(true)
+        }, 1000)
+      }
+    }
+  }
+
   const t = translations[language]
 
   // 验证 GitHub 仓库名称格式
@@ -2840,78 +2970,6 @@ function GeneratePageContent() {
     </SidebarProvider>
   )
 
-  // 异步任务相关函数
-  // SSE监听异步任务状态
-  const startSSEListening = (taskId: string) => {
-    console.log(`🔄 建立SSE连接监听任务: ${taskId}`)
-    setIsGenerating(true)
-    setGenerationMode('async')
-
-    // 关闭之前的SSE连接
-    if (sseRef.current) {
-      sseRef.current.close()
-    }
-
-    // 创建EventSource连接
-    const eventSource = new EventSource(`/api/generate-async/${taskId}/stream`)
-
-    eventSource.onopen = () => {
-      console.log('📡 SSE连接已建立')
-    }
-
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        console.log('📨 收到SSE消息:', data)
-
-        switch (data.type) {
-          case 'connected':
-            console.log('✅ SSE连接确认')
-            break
-
-          case 'status_update':
-            setAsyncProgress(data.progress || 0)
-            console.log(`📊 任务状态: ${data.message}`)
-            break
-
-          case 'progress_update':
-            setAsyncProgress(data.progress || 0)
-            console.log(`📈 进度更新: ${data.message}`)
-            break
-
-          case 'completed':
-            console.log(`✅ 异步任务完成: ${taskId}`)
-            eventSource.close()
-            handleAsyncTaskCompleted({ ...data, taskId, status: 'completed', content: JSON.stringify(data.result) })
-            break
-
-          case 'failed':
-            console.error(`❌ 异步任务失败: ${taskId}`, data.error)
-            eventSource.close()
-            setError(data.message || '生成失败，请重试')
-            setIsGenerating(false)
-            setGenerationMode('streaming')
-            setCurrentTaskId(null)
-            setAsyncTaskId(null)
-            break
-        }
-      } catch (error) {
-        console.error('解析SSE消息失败:', error)
-      }
-    }
-
-    eventSource.onerror = (error) => {
-      console.error('SSE连接错误:', error)
-      eventSource.close()
-
-      // SSE连接失败，设置错误状态
-      setError('网络连接失败，请重试')
-      setIsGenerating(false)
-    }
-
-    // 存储EventSource引用
-    sseRef.current = eventSource
-  }
 
   // 停止SSE监听
   const stopSSEListening = () => {
@@ -2922,60 +2980,7 @@ function GeneratePageContent() {
   }
 
 
-  const handleAsyncTaskCompleted = (status: TaskStatus) => {
-    if (status.result) {
-      console.log('📦 处理异步任务结果')
-
-      setGeneratedProject(status.result)
-      setSelectedFile('src/App.tsx')
-      setIsGenerating(false)
-      setGenerationMode('streaming') // 重置为流式模式
-      setCurrentTaskId(null)
-      setAsyncTaskId(null)
-      setAsyncProgress(0)
-
-      // 显示成功消息
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: `✅ 代码生成完成！使用了智能异步模式以确保稳定性。`,
-        timestamp: new Date()
-      }])
-
-      // 自动打开预览
-      if (status.result?.files?.['src/App.tsx']) {
-        setTimeout(() => {
-          setPreviewPrompt(prompt.trim())
-          setIsPreviewLoading(true)
-        }, 1000)
-      }
-    }
-  }
-
-  const cancelAsyncGeneration = async () => {
-    if (!asyncTaskId) return
-
-    try {
-      console.log(`🛑 取消异步任务: ${asyncTaskId}`)
-
-      await fetch(`/api/generate-async/${asyncTaskId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${authSession?.accessToken || ''}`,
-        },
-      })
-
-      setIsGenerating(false)
-      setGenerationMode('streaming')
-      setCurrentTaskId(null)
-      setAsyncTaskId(null)
-      setAsyncProgress(0)
-      setError('异步生成已取消')
-
-    } catch (error) {
-      console.error('取消异步任务失败:', error)
-    }
-  }
+  // 删除重复的handleAsyncTaskCompleted函数定义（已在前面定义）
 
   // 复杂度评估函数
   const assessPromptComplexity = (prompt: string): number => {
