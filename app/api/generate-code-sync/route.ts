@@ -59,8 +59,18 @@ export async function POST(request: NextRequest) {
     console.log('🚀 开始AI代码生成，等待完整生成...')
 
     try {
-      // 直接调用AI生成代码（同步等待完成）
-      const generatedCode = await generateCodeWithAI(prompt.trim())
+      // 设置45秒超时，避免CloudBase的60秒硬限制
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('SYNC_GENERATION_TIMEOUT')), 45000)
+      })
+
+      console.log('🚀 开始同步AI代码生成（45秒超时限制）...')
+
+      // 直接调用AI生成代码，带超时控制
+      const generatedCode = await Promise.race([
+        generateCodeWithAI(prompt.trim()),
+        timeoutPromise
+      ])
 
       console.log('✅ AI代码生成完成')
 
@@ -133,45 +143,25 @@ async function generateCodeWithAI(prompt: string): Promise<string> {
     messages: [
       {
         role: 'system',
-        content: `Generate a clean React component using JavaScript. Return ONLY the component code.
-
-IMPORTANT: Your response must be ONLY the raw JavaScript code - no markdown, no explanations, no comments about the code.
+        content: `Generate a clean React component in JavaScript. Return ONLY the code, no explanations.
 
 Requirements:
-1. Use plain JavaScript (no TypeScript, no interfaces, no type annotations)
-2. Use React hooks (useState, useEffect, etc.)
-3. Use functional components
-4. Include all necessary imports at the top
-5. Use Tailwind CSS classes for styling
-6. Export the component as default
-7. Make it production-ready with proper error handling
-8. Keep the code clean and well-formatted
-9. Do not include any comments or explanations in the code
+1. Plain JavaScript only (no TypeScript)
+2. React hooks and functional components
+3. All imports at top
+4. Tailwind CSS styling
+5. Default export
+6. Keep it simple and focused
 
-Example structure:
-import React, { useState } from 'react';
-
-const ComponentName = () => {
-  const [state, setState] = useState(initialValue);
-  // component logic here
-  return (
-    <div className="...">
-      {/* JSX here */}
-    </div>
-  );
-};
-
-export default ComponentName;
-
-Return ONLY this type of clean JavaScript code, nothing else.`
+Return ONLY the raw JavaScript code, nothing else.`
       },
       {
         role: 'user',
         content: prompt.trim()
       }
     ],
-    max_tokens: 4000, // 增加token限制以生成更完整的代码
-    temperature: 0.7, // 提高创造性，生成更丰富的代码
+    max_tokens: 2500, // 减少token限制以加快生成速度
+    temperature: 0.6, // 平衡创造性和速度
   })
 
   const content = completion.choices[0]?.message?.content

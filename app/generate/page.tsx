@@ -2937,6 +2937,10 @@ function GeneratePageContent() {
     try {
       console.log('🚀 启动异步生成模式')
 
+      // 获取当前输入的prompt
+      const currentPrompt = prompt.trim()
+      const currentConversationId = conversationIdToUse
+
       const response = await fetch('/api/generate-async', {
         method: 'POST',
         headers: {
@@ -2944,7 +2948,7 @@ function GeneratePageContent() {
           'Authorization': `Bearer ${authSession?.accessToken || ''}`,
         },
         body: JSON.stringify({
-          prompt: prompt.trim(),
+          prompt: currentPrompt,
           model: selectedModel,
           conversationId: currentConversationId
         }),
@@ -3229,6 +3233,28 @@ function GeneratePageContent() {
       }
 
       console.error('生成失败:', error)
+
+      // 检查是否是同步超时，如果是则自动切换到异步模式
+      if (error.message?.includes('SYNC_GENERATION_TIMEOUT')) {
+        console.log('⏰ 检测到同步生成超时，自动切换到异步模式...')
+
+        setError(language === 'en' ? 'Generation taking longer than expected. Switching to async mode...' : '生成时间较长，正在切换到异步模式...')
+        setGenerationProgress(null)
+
+        // 延迟一下再启动异步模式，给用户看到切换提示
+        setTimeout(async () => {
+          try {
+            await startAsyncGeneration()
+          } catch (asyncError) {
+            console.error('异步模式启动失败:', asyncError)
+            setError(language === 'en' ? 'Both sync and async generation failed. Please try again.' : '同步和异步生成都失败了，请重试。')
+            setIsGenerating(false)
+          }
+        }, 2000)
+
+        return
+      }
+
       setError(error.message || '生成失败，请重试')
       setIsGenerating(false)
       setIsStreaming(false)
@@ -3245,7 +3271,7 @@ function GeneratePageContent() {
       setMessages(prev => [...prev, errorAiMessage])
 
       if (conversationId) {
-        await saveMessageToConversation(conversationId, `❌ 生成失败: ${error.message}`)
+        await saveMessageToConversation(conversationId, 'assistant', `❌ 生成失败: ${error.message}`)
       }
     }
   }
