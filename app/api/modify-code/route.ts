@@ -37,7 +37,10 @@ export async function POST(request: NextRequest) {
 
     console.log('🔄 开始同步AI代码修改...')
 
+    console.log('🔧 开始AI代码修改，让AI完全修改完毕...')
+
     try {
+      // 直接调用AI，不设置主动超时，让CloudBase平台自然处理60秒超时
       const completion = await client.chat.completions.create({
         model: model,
         messages: [
@@ -51,6 +54,7 @@ Requirements:
 3. Ensure the code remains functional
 4. Use proper indentation (2 spaces)
 5. Return the complete modified code
+6. Take your time to make comprehensive modifications
 
 Example:
 User code: "function App() { return <div>Hello</div>; }"
@@ -62,9 +66,11 @@ Response: "function App() { return <div><div>Hello</div><button>Click me</button
             content: `Current code:\n\`\`\`typescript\n${code}\n\`\`\`\n\nInstruction: ${instruction}\n\nReturn only the modified code:`
           }
         ],
-        max_tokens: parseInt(process.env.DEEPSEEK_MAX_TOKENS || '4000'),
-        temperature: parseFloat(process.env.DEEPSEEK_TEMPERATURE || '0.7'),
+        max_tokens: parseInt(process.env.DEEPSEEK_MAX_TOKENS || '3000'), // 增加token限制
+        temperature: parseFloat(process.env.DEEPSEEK_TEMPERATURE || '0.5'), // 中等随机性
       })
+
+      console.log('✅ 同步代码修改完成')
 
       // 获取完整响应
       const content = completion.choices[0]?.message?.content
@@ -82,8 +88,6 @@ Response: "function App() { return <div><div>Hello</div><button>Click me</button
         modifiedCode = match[1].trim()
       }
 
-      console.log('✅ 同步代码修改完成')
-
       return NextResponse.json({
         code: 0,
         msg: '代码修改成功',
@@ -96,29 +100,19 @@ Response: "function App() { return <div><div>Hello</div><button>Click me</button
     } catch (error: any) {
       console.error('❌ 同步代码修改失败:', error)
 
-      // Handle specific error types
-      let errorMessage = 'Failed to modify code'
-      let errorDetails = ''
-
-      if (error?.status === 402 || error?.response?.status === 402) {
-        errorMessage = 'Insufficient API Balance'
-        errorDetails = 'Your API account has insufficient balance. Please top up your account to continue using the service.'
-      } else if (error?.status === 401 || error?.response?.status === 401) {
-        errorMessage = 'Invalid API Key'
-        errorDetails = 'The API key is invalid or expired. Please check your API configuration.'
-      } else if (error?.status === 429 || error?.response?.status === 429) {
-        errorMessage = 'Rate Limit Exceeded'
-        errorDetails = 'Too many requests. Please wait a moment and try again.'
-      } else if (error?.message) {
-        errorMessage = error.message
-        errorDetails = error.message
+      // 如果是网络超时或其他错误，给出相应提示
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        return NextResponse.json({
+          code: -1,
+          msg: '网络请求超时，请稍后重试',
+          error: '网络超时'
+        }, { status: 500 })
       }
 
       return NextResponse.json({
         code: -1,
         msg: '代码修改失败',
-        error: errorMessage,
-        details: errorDetails
+        error: error.message
       }, { status: 500 })
     }
 

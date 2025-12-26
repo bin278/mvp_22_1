@@ -3056,11 +3056,11 @@ function GeneratePageContent() {
 
   // 同步生成代码，直接等待完成后再显示
   async function startDirectGeneration(prompt: string, conversationId: string) {
-    console.log('🎯 启动同步AI代码生成')
+    console.log('🎯 启动异步AI代码生成')
 
     try {
-      // 直接调用同步API生成代码
-      console.log('🚀 调用同步代码生成API...')
+      // 调用异步API生成代码（立即返回任务ID）
+      console.log('🚀 调用异步代码生成API...')
       const response = await fetch('/api/generate-code-sync', {
         method: 'POST',
         headers: {
@@ -3087,35 +3087,11 @@ function GeneratePageContent() {
         throw new Error(result.msg || '代码生成失败')
       }
 
-      const { code: generatedCode, codeLength } = result.data
-      console.log(`✅ 代码生成成功，长度: ${codeLength}字符`)
+      const { taskId } = result.data
+      console.log(`📝 任务已创建，ID: ${taskId}`)
 
-      // 设置最终结果状态
-      setGeneratedProject({
-        files: {
-          'src/App.tsx': generatedCode
-        },
-        projectName: 'GeneratedApp'
-      })
-      setSelectedFile('src/App.tsx')
-      setIsGenerating(false)
-      setIsStreaming(false)
-
-      // 添加AI回复到对话
-      const aiMessage: Message = {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content: '✅ 代码生成完成！',
-        timestamp: new Date()
-      }
-      setMessages(prev => [...prev, aiMessage])
-
-      // 保存到数据库
-      if (conversationId) {
-        await saveMessageToConversation(conversationId, 'assistant', '代码生成完成！')
-      }
-
-      console.log('🎉 生成完成！')
+      // 开始轮询任务状态
+      await pollTaskStatus(taskId, prompt, conversationId)
 
     } catch (error: any) {
       if (error.name === 'AbortError') {
@@ -3128,6 +3104,141 @@ function GeneratePageContent() {
       setIsGenerating(false)
       setIsStreaming(false)
       setAbortController(null)
+    }
+  }
+
+  // 轮询任务状态
+  const pollTaskStatus = async (taskId: string, originalPrompt: string, conversationId: string) => {
+    console.log('🔄 开始轮询任务状态:', taskId)
+
+    const pollInterval = 2000 // 2秒轮询一次
+    const maxAttempts = 300 // 最多轮询10分钟 (300 * 2秒)
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        console.log(`🔍 第${attempt}次轮询任务状态...`)
+
+        const response = await fetch(`/api/generate-code-task?taskId=${taskId}`)
+        const result = await response.json()
+
+        if (result.code !== 0) {
+          throw new Error(result.msg || '查询任务状态失败')
+        }
+
+        const { status, code: generatedCode, codeLength, error: taskError } = result.data
+
+        if (status === 'completed' && generatedCode) {
+          console.log(`✅ 任务完成，代码长度: ${codeLength}字符`)
+
+          // 设置最终结果状态
+          setGeneratedProject({
+            files: {
+              'src/App.tsx': generatedCode
+            },
+            projectName: 'GeneratedApp'
+          })
+          setSelectedFile('src/App.tsx')
+          setIsGenerating(false)
+          setIsStreaming(false)
+          setAbortController(null)
+
+          // 添加成功消息到对话
+          const aiMessage: Message = {
+            id: Date.now().toString(),
+            role: 'assistant',
+            content: '✅ 代码生成完成！',
+            timestamp: new Date()
+          }
+          setMessages(prev => [...prev, aiMessage])
+
+          // 保存到数据库
+          if (conversationId) {
+            await saveMessageToConversation(conversationId, 'assistant', '代码生成完成！')
+          }
+
+          console.log('🎉 生成完成！')
+          return // 任务完成，停止轮询
+
+        } else if (status === 'failed') {
+          console.error('❌ 任务失败:', taskError)
+          throw new Error(taskError || '代码生成失败')
+
+        } else if (status === 'processing') {
+          console.log(`⏳ 任务仍在处理中... (${attempt}/${maxAttempts})`)
+
+          // 更新对话显示进度
+          const progressMessage = `⏳ AI正在生成代码... (${Math.round(attempt * 2)}秒)`
+          setMessages(prev => {
+            const lastMessage = prev[prev.length - 1]
+            if (lastMessage?.role === 'assistant' && lastMessage.content.startsWith('⏳')) {
+              // 更新最后一条进度消息
+              return prev.map(msg =>
+                msg.id === lastMessage.id
+                  ? { ...msg, content: progressMessage, timestamp: new Date() }
+                  : msg
+              )
+            } else {
+              // 添加新的进度消息
+              const progressAiMessage: Message = {
+                id: Date.now().toString(),
+                role: 'assistant',
+                content: progressMessage,
+                timestamp: new Date()
+              }
+              return [...prev, progressAiMessage]
+            }
+          })
+
+          // 等待后继续轮询
+          await new Promise(resolve => setTimeout(resolve, pollInterval))
+        } else {
+          console.warn('⚠️ 未知任务状态:', status)
+          await new Promise(resolve => setTimeout(resolve, pollInterval))
+        }
+
+      } catch (error: any) {
+        console.error('轮询任务状态失败:', error)
+        setIsGenerating(false)
+        setIsStreaming(false)
+        setAbortController(null)
+
+        const errorMessage = `生成失败: ${error.message}`
+        setError(errorMessage)
+
+        const errorAiMessage: Message = {
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: `❌ ${errorMessage}`,
+          timestamp: new Date()
+        }
+        setMessages(prev => [...prev, errorAiMessage])
+
+        if (conversationId) {
+          await saveMessageToConversation(conversationId, `❌ ${errorMessage}`)
+        }
+        return
+      }
+    }
+
+    // 轮询超时
+    console.error('❌ 轮询超时，任务可能仍在后台处理')
+    setIsGenerating(false)
+    setIsStreaming(false)
+    setAbortController(null)
+
+    const timeoutMessage = '生成超时：任务已在后台启动，请稍后刷新页面查看结果'
+    setError(timeoutMessage)
+
+    const timeoutAiMessage: Message = {
+      id: Date.now().toString(),
+      role: 'assistant',
+      content: `⏰ ${timeoutMessage}`,
+      timestamp: new Date()
+    }
+    setMessages(prev => [...prev, timeoutAiMessage])
+
+    if (conversationId) {
+      await saveMessageToConversation(conversationId, timeoutMessage)
     }
   }
 

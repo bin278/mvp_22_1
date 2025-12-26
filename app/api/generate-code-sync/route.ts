@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import jwt from 'jsonwebtoken'
+import { randomUUID } from 'crypto'
 import { add } from '@/lib/database/cloudbase'
+
 
 interface JWTPayload {
   userId?: string
@@ -54,47 +56,83 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log('🔄 开始同步AI代码生成...')
+    // 生成任务ID
+    const taskId = randomUUID()
+    console.log('🔄 开始AI代码生成，任务ID:', taskId)
 
+    // 创建任务记录到数据库
     try {
-      // 直接调用AI生成代码（同步等待）
-      const generatedCode = await generateCodeWithAI(prompt.trim())
+      await add('code_generation_tasks', {
+        taskId,
+        openid,
+        prompt: prompt.trim(),
+        status: 'processing',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      })
+      console.log('📝 任务记录已创建:', taskId)
+    } catch (dbError: any) {
+      console.warn('⚠️ 创建任务记录失败:', dbError.message)
+    }
 
-      console.log('✅ 同步代码生成完成')
+    // 异步执行代码生成（不等待结果）
+    generateCodeWithAI(prompt.trim()).then(async (generatedCode) => {
+      console.log('✅ 异步代码生成完成，任务ID:', taskId)
 
-      // 保存生成记录到数据库（可选，用于统计）
       try {
+        // 更新任务状态为完成
+        const db = getDatabase()
+        await db.collection('code_generation_tasks').doc(taskId).update({
+          status: 'completed',
+          code: generatedCode,
+          codeLength: generatedCode.length,
+          completedAt: new Date(),
+          updatedAt: new Date()
+        })
+
+        // 保存生成记录到历史表
         await add('code_generation_history', {
+          taskId,
           openid,
           prompt: prompt.trim(),
           code: generatedCode,
           codeLength: generatedCode.length,
           createdAt: new Date(),
-          method: 'sync'
+          method: 'async'
         })
-        console.log('📊 生成历史已保存到数据库')
+
+        console.log('📊 任务完成并保存到数据库:', taskId)
       } catch (dbError: any) {
-        console.warn('⚠️ 保存生成历史失败，但不影响代码生成:', dbError.message)
-        // 不抛出错误，继续返回生成结果
+        console.error('❌ 保存生成结果失败:', dbError)
       }
+    }).catch(async (error) => {
+      console.error('❌ 异步代码生成失败，任务ID:', taskId, error)
 
-      return NextResponse.json({
-        code: 0,
-        msg: '代码生成成功',
-        data: {
-          code: generatedCode,
-          codeLength: generatedCode.length
-        }
-      })
+      try {
+        // 更新任务状态为失败
+        const db = getDatabase()
+        await db.collection('code_generation_tasks').doc(taskId).update({
+          status: 'failed',
+          error: error.message,
+          failedAt: new Date(),
+          updatedAt: new Date()
+        })
+        console.log('📊 任务失败状态已更新:', taskId)
+      } catch (dbError: any) {
+        console.error('❌ 更新任务失败状态失败:', dbError)
+      }
+    })
 
-    } catch (error: any) {
-      console.error('❌ 同步代码生成失败:', error)
-      return NextResponse.json({
-        code: -1,
-        msg: '代码生成失败',
-        error: error.message
-      }, { status: 500 })
-    }
+    // 立即返回任务ID给前端
+    return NextResponse.json({
+      code: 0,
+      msg: '代码生成任务已启动',
+      data: {
+        taskId,
+        status: 'processing',
+        message: 'AI正在生成代码，请稍候...'
+      }
+    })
 
   } catch (err: any) {
     console.error('同步生成请求失败:', err)
@@ -105,11 +143,11 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// AI代码生成函数（复用现有的AI调用逻辑）
+// AI代码生成函数（让AI完全生成完毕后再返回）
 async function generateCodeWithAI(prompt: string): Promise<string> {
   const model = 'deepseek-chat' // 默认使用deepseek
 
-  // 获取API配置（复用generate-stream的逻辑）
+  // 获取API配置
   let apiKey: string
   let baseUrl: string
   let client: any
@@ -126,6 +164,9 @@ async function generateCodeWithAI(prompt: string): Promise<string> {
   })
 
   try {
+    console.log('🚀 开始AI代码生成，让AI完全生成完毕...')
+
+    // 直接调用AI，不设置主动超时，让CloudBase平台自然处理60秒超时
     const completion = await client.chat.completions.create({
       model: model,
       messages: [
@@ -140,31 +181,45 @@ Requirements:
 4. Use Tailwind CSS classes for styling
 5. Make it immediately runnable
 6. Export as default
+7. Take your time to generate comprehensive, well-structured code
 
 Example output:
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
-function App() {
+function Dashboard() {
+  const [data, setData] = useState([]);
+
+  useEffect(() => {
+    // Load data
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    // Implementation
+  };
+
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-      <div className="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
-        <h1 className="text-2xl font-bold text-gray-800 mb-4">Hello World</h1>
-        <p className="text-gray-600">Welcome to my app!</p>
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-7xl mx-auto">
+        <h1 className="text-3xl font-bold text-gray-900 mb-8">Dashboard</h1>
+        {/* Content */}
       </div>
     </div>
   );
 }
 
-export default App;`
+export default Dashboard;`
         },
         {
           role: 'user',
           content: prompt.trim()
         }
       ],
-      max_tokens: parseInt(process.env.DEEPSEEK_MAX_TOKENS || '4000'),
-      temperature: parseFloat(process.env.DEEPSEEK_TEMPERATURE || '0.7'),
+      max_tokens: parseInt(process.env.DEEPSEEK_MAX_TOKENS || '4000'), // 增加token限制
+      temperature: parseFloat(process.env.DEEPSEEK_TEMPERATURE || '0.7'), // 保持创造性
     })
+
+    console.log('✅ AI代码生成完成')
 
     // 获取完整响应
     const content = completion.choices[0]?.message?.content
@@ -175,6 +230,13 @@ export default App;`
     return content.trim()
   } catch (error: any) {
     console.error('AI生成失败:', error)
+
+    // 如果是网络超时或其他错误，给出相应提示
+    if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+      throw new Error('网络请求超时，请稍后重试')
+    }
+
     throw new Error(`AI生成失败: ${error.message}`)
   }
 }
+
