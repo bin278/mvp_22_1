@@ -303,8 +303,9 @@ function GeneratePageContent() {
       sseRef.current.close()
     }
 
-    // 创建EventSource连接
-    const eventSource = new EventSource(`/api/generate-async/${taskId}/stream`)
+    // 创建EventSource连接，携带认证token
+    const token = authSession?.accessToken || ''
+    const eventSource = new EventSource(`/api/generate-async/${taskId}/stream?token=${encodeURIComponent(token)}`)
 
     eventSource.onopen = () => {
       console.log('📡 SSE连接已建立')

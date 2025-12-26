@@ -26,8 +26,23 @@ export async function GET(
   const taskId = params.taskId
 
   try {
-    // 认证
-    const authResult = await requireAuth(request)
+    // 从查询参数获取token进行认证 (SSE不支持Authorization头)
+    const url = new URL(request.url)
+    const token = url.searchParams.get('token')
+
+    if (!token) {
+      return new Response('Authentication token required', { status: 401 })
+    }
+
+    // 验证token
+    const authResult = await requireAuth({
+      ...request,
+      headers: new Headers({
+        ...Object.fromEntries(request.headers.entries()),
+        'authorization': `Bearer ${token}`
+      })
+    })
+
     if (!authResult.success) {
       return new Response('Authentication required', { status: 401 })
     }

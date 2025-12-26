@@ -41,7 +41,7 @@ interface GenerationTask {
 }
 
 // 全局任务队列（生产环境应该用Redis或数据库）
-const taskQueue = new Map<string, GenerationTask>()
+export const taskQueue = new Map<string, GenerationTask>()
 
 // AI客户端初始化
 function getAIClient(model: string) {

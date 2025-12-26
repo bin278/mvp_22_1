@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth/auth'
-
-// 导入任务队列（在实际应用中应该用Redis或数据库）
-const taskQueue = new Map<string, any>()
+import { taskQueue } from '../route'
 
 // 查询任务状态
 export async function GET(
