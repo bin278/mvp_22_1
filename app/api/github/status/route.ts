@@ -39,14 +39,11 @@ export async function GET(request: NextRequest) {
       })
 
     } catch (queryError: any) {
-      // 如果集合不存在，返回未连接状态
-      if (queryError.message && queryError.message.includes('DATABASE_COLLECTION_NOT_EXIST')) {
-        console.log('GitHub tokens collection does not exist yet')
-        return NextResponse.json({
-          connected: false,
-        })
-      }
-      throw queryError
+      console.warn("GitHub status check failed:", queryError.message)
+      // 如果数据库查询失败，默认返回未连接状态
+      return NextResponse.json({
+        connected: false,
+      })
     }
   } catch (error: any) {
     console.error('Error checking GitHub status:', error)

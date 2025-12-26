@@ -181,6 +181,7 @@ function GeneratePageContent() {
   }
   const [prompt, setPrompt] = useState("")
   const [isGenerating, setIsGenerating] = useState(false)
+  const [generationProgress, setGenerationProgress] = useState<{message: string, elapsed: number} | null>(null)
   const [generatedProject, setGeneratedProject] = useState<GeneratedProject | null>(null)
   const [copied, setCopied] = useState(false)
   const [selectedFile, setSelectedFile] = useState<string>("src/App.tsx")
@@ -355,9 +356,14 @@ function GeneratePageContent() {
   }
 
   const saveMessageToConversation = async (conversationId: string, role: 'user' | 'assistant', content: string) => {
-    if (!conversationId || !authSession?.accessToken) return
+    if (!conversationId || !authSession?.accessToken) {
+      console.warn('saveMessageToConversation: Missing conversationId or auth token', { conversationId, hasToken: !!authSession?.accessToken })
+      return
+    }
 
     try {
+      console.log(`💬 Saving ${role} message to conversation ${conversationId}...`)
+
       const response = await fetch(`/api/conversations/${conversationId}/messages`, {
         method: "POST",
         headers: {
@@ -367,13 +373,31 @@ function GeneratePageContent() {
         body: JSON.stringify({ role, content }),
       })
 
+      console.log(`API Response status: ${response.status}`)
+
       if (!response.ok) {
-        console.error("Failed to save message to conversation")
+        const errorText = await response.text()
+        console.error(`❌ Failed to save message to conversation: ${response.status} ${response.statusText}`)
+        console.error('Response body:', errorText)
+        console.error('Request details:', {
+          url: `/api/conversations/${conversationId}/messages`,
+          method: 'POST',
+          body: { role, content: content.substring(0, 100) + '...' }
+        })
       } else {
-        console.log(`✅ Saved ${role} message to conversation ${conversationId}`)
+        const result = await response.json()
+        console.log(`✅ Saved ${role} message to conversation ${conversationId}`, result)
       }
     } catch (error) {
-      console.error("Error saving message to conversation:", error)
+      console.error("❌ Error saving message to conversation:", error)
+      console.error('Error details:', {
+        conversationId,
+        role,
+        contentLength: content.length,
+        contentPreview: content.substring(0, 100) + '...',
+        hasAuth: !!authSession?.accessToken,
+        error: error instanceof Error ? error.message : String(error)
+      })
     }
   }
 
@@ -1660,6 +1684,7 @@ function GeneratePageContent() {
 
   return (
     <SidebarProvider defaultOpen={true}>
+
       <div className="min-h-screen bg-background flex w-full">
         <ConversationSidebar
           currentConversationId={currentConversationId}
@@ -2012,52 +2037,122 @@ function GeneratePageContent() {
                 </>
               ) : isGenerating ? (
                 <>
-                  {/* Polling/Async Generation Display */}
+                  {/* AI Code Generation Display */}
                   <div className="rounded-xl border border-border bg-card overflow-hidden">
-                    <div className="bg-secondary/50 px-4 py-3 border-b border-border flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                        <h2 className="text-lg font-semibold">
-                          {language === "en" ? "Generating Code..." : "正在生成代码..."}
-                        </h2>
+                    <div className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-950/20 dark:to-purple-950/20 px-6 py-5 border-b border-border">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <div className="relative">
+                            <div className="w-4 h-4 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full animate-pulse"></div>
+                            <div className="absolute inset-0 w-4 h-4 bg-gradient-to-r from-blue-400 to-purple-400 rounded-full animate-ping opacity-75"></div>
+                          </div>
+                          <div>
+                            <h2 className="text-xl font-semibold text-foreground mb-1">
+                              🎨 {language === "en" ? "AI is crafting your code..." : "AI正在为您精心制作代码..."}
+                            </h2>
+                            <p className="text-sm text-muted-foreground">
+                              {generationProgress?.message || (language === "en" ? "Creating a beautiful, functional component..." : "正在创建一个美观、实用的组件...")}
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          onClick={() => {
+                            console.log('🛑 用户取消生成')
+                            // 取消生成
+                            if (asyncTaskId) {
+                              cancelAsyncGeneration()
+                            } else {
+                              // 设置状态并取消
+                              setIsGenerating(false)
+                              setGenerationProgress(null)
+                              setError(language === "en" ? "Generation cancelled" : "生成已取消")
+                              // 创建新的abortController并立即取消
+                              const controller = new AbortController()
+                              controller.abort()
+                              setAbortController(controller)
+                            }
+                          }}
+                          variant="outline"
+                          size="sm"
+                          className="text-xs border-red-200 hover:bg-red-50 hover:border-red-300 dark:border-red-800 dark:hover:bg-red-950"
+                        >
+                          {language === "en" ? "Cancel" : "取消"}
+                        </Button>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          console.log('🛑 用户取消生成')
-                          // 取消生成
-                          if (asyncTaskId) {
-                            cancelAsyncGeneration()
-                          } else {
-                            // 设置状态并取消
-                            setIsGenerating(false)
-                            setError('用户已取消生成')
-                            // 创建新的abortController并立即取消
-                            const controller = new AbortController()
-                            controller.abort()
-                            setAbortController(controller)
-                          }
-                        }}
-                        className="text-xs"
-                      >
-                        {language === "en" ? "Cancel" : "取消"}
-                      </Button>
+
+                      {/* Progress Bar */}
+                      <div className="mt-4">
+                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 overflow-hidden">
+                          <div
+                            className="bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 h-2.5 rounded-full animate-pulse transition-all duration-1000 ease-out"
+                            style={{width: generationProgress?.elapsed ? `${Math.min(85, (generationProgress.elapsed / 45) * 100)}%` : '25%'}}
+                          ></div>
+                        </div>
+                        <div className="flex justify-between items-center mt-3">
+                          <span className="text-xs text-muted-foreground">
+                            {language === "en" ? "Building your perfect component..." : "正在构建您的完美组件..."}
+                          </span>
+                          <span className="text-xs text-muted-foreground font-medium">
+                            {generationProgress?.elapsed ? `${generationProgress.elapsed}s` : '0s'}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex items-center justify-center h-[60vh] bg-[#1e1e1e]">
-                      <div className="text-center">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-                        <p className="text-muted-foreground">
-                          {asyncTaskId
-                            ? (language === "en" ? "Processing complex code generation..." : "正在处理复杂的代码生成...")
-                            : (language === "en" ? "Generating code in background..." : "正在后台生成代码...")
+
+                    {/* Code Preview Area */}
+                    <div className="flex items-center justify-center min-h-[55vh] bg-gradient-to-br from-slate-50 via-blue-50/30 to-purple-50/30 dark:from-slate-900 dark:via-blue-950/20 dark:to-purple-950/20">
+                      <div className="text-center max-w-lg mx-auto px-8">
+                        <div className="relative mb-8">
+                          <div className="w-24 h-24 bg-gradient-to-br from-blue-400 via-purple-500 to-pink-500 rounded-3xl flex items-center justify-center mx-auto shadow-xl">
+                            <svg className="w-12 h-12 text-white animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
+                          </div>
+                          <div className="absolute -inset-3 bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 rounded-3xl blur-lg opacity-30 animate-pulse"></div>
+                        </div>
+
+                        <h3 className="text-2xl font-bold text-foreground mb-4">
+                          {language === "en" ? "AI Magic in Progress" : "AI魔法进行中"}
+                        </h3>
+
+                        <p className="text-muted-foreground mb-8 leading-relaxed text-base">
+                          {language === "en"
+                            ? "Crafting a beautiful, fully-featured React component with modern design patterns and comprehensive functionality."
+                            : "正在精心打造一个功能完整、美观现代的React组件，包含最佳实践和完整功能。"
                           }
                         </p>
-                        {asyncProgress > 0 && (
-                          <p className="text-sm text-muted-foreground mt-2">
-                            {language === "en" ? `Progress: ${asyncProgress}%` : `进度: ${asyncProgress}%`}
-                          </p>
-                        )}
+
+                        <div className="flex justify-center space-x-3 mb-6">
+                          <div className="flex space-x-2">
+                            <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
+                            <div className="w-3 h-3 bg-purple-500 rounded-full animate-bounce" style={{animationDelay: '200ms'}}></div>
+                            <div className="w-3 h-3 bg-pink-500 rounded-full animate-bounce" style={{animationDelay: '400ms'}}></div>
+                            <div className="w-3 h-3 bg-indigo-500 rounded-full animate-bounce" style={{animationDelay: '600ms'}}></div>
+                          </div>
+                        </div>
+
+                        <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm rounded-lg p-4 border border-white/20 dark:border-slate-700/50">
+                          <div className="grid grid-cols-3 gap-4 text-center">
+                            <div className="space-y-1">
+                              <div className="text-2xl">⚛️</div>
+                              <div className="text-xs text-muted-foreground">
+                                {language === "en" ? "React" : "React"}
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <div className="text-2xl">🎨</div>
+                              <div className="text-xs text-muted-foreground">
+                                {language === "en" ? "Modern UI" : "现代化UI"}
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <div className="text-2xl">✨</div>
+                              <div className="text-xs text-muted-foreground">
+                                {language === "en" ? "TypeScript" : "TypeScript"}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -3054,148 +3149,20 @@ function GeneratePageContent() {
     }
   }
 
-  // 轮询任务状态
-  const pollTaskStatus = async (taskId: string, originalPrompt: string, conversationId: string) => {
-    console.log('🔄 开始轮询任务状态:', taskId)
 
-    const pollInterval = 2000 // 2秒轮询一次
-    const maxAttempts = 300 // 最多轮询10分钟 (300 * 2秒)
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        console.log(`🔍 第${attempt}次轮询任务状态...`)
-
-        const response = await fetch(`/api/generate-code-task?taskId=${taskId}`)
-        const result = await response.json()
-
-        if (result.code !== 0) {
-          throw new Error(result.msg || '查询任务状态失败')
-        }
-
-        const { status, code: generatedCode, codeLength, error: taskError } = result.data
-
-        if (status === 'completed' && generatedCode) {
-          console.log(`✅ 任务完成，代码长度: ${codeLength}字符`)
-
-          // 设置最终结果状态
-          setGeneratedProject({
-            files: {
-              'src/App.tsx': generatedCode
-            },
-            projectName: 'GeneratedApp'
-          })
-          setSelectedFile('src/App.tsx')
-          setIsGenerating(false)
-          setIsStreaming(false)
-          setAbortController(null)
-
-          // 添加成功消息到对话
-          const aiMessage: Message = {
-            id: Date.now().toString(),
-            role: 'assistant',
-            content: '✅ 代码生成完成！',
-            timestamp: new Date()
-          }
-          setMessages(prev => [...prev, aiMessage])
-
-          // 保存到数据库
-          if (conversationId) {
-            await saveMessageToConversation(conversationId, 'assistant', '代码生成完成！')
-          }
-
-          console.log('🎉 生成完成！')
-          return // 任务完成，停止轮询
-
-        } else if (status === 'failed') {
-          console.error('❌ 任务失败:', taskError)
-          throw new Error(taskError || '代码生成失败')
-
-        } else if (status === 'processing') {
-          console.log(`⏳ 任务仍在处理中... (${attempt}/${maxAttempts})`)
-
-          // 更新对话显示进度
-          const progressMessage = `⏳ AI正在生成代码... (${Math.round(attempt * 2)}秒)`
-          setMessages(prev => {
-            const lastMessage = prev[prev.length - 1]
-            if (lastMessage?.role === 'assistant' && lastMessage.content.startsWith('⏳')) {
-              // 更新最后一条进度消息
-              return prev.map(msg =>
-                msg.id === lastMessage.id
-                  ? { ...msg, content: progressMessage, timestamp: new Date() }
-                  : msg
-              )
-            } else {
-              // 添加新的进度消息
-              const progressAiMessage: Message = {
-                id: Date.now().toString(),
-                role: 'assistant',
-                content: progressMessage,
-                timestamp: new Date()
-              }
-              return [...prev, progressAiMessage]
-            }
-          })
-
-          // 等待后继续轮询
-          await new Promise(resolve => setTimeout(resolve, pollInterval))
-        } else {
-          console.warn('⚠️ 未知任务状态:', status)
-          await new Promise(resolve => setTimeout(resolve, pollInterval))
-        }
-
-      } catch (error: any) {
-        console.error('轮询任务状态失败:', error)
-        setIsGenerating(false)
-        setIsStreaming(false)
-        setAbortController(null)
-
-        const errorMessage = `生成失败: ${error.message}`
-        setError(errorMessage)
-
-        const errorAiMessage: Message = {
-          id: Date.now().toString(),
-          role: 'assistant',
-          content: `❌ ${errorMessage}`,
-          timestamp: new Date()
-        }
-        setMessages(prev => [...prev, errorAiMessage])
-
-        if (conversationId) {
-          await saveMessageToConversation(conversationId, `❌ ${errorMessage}`)
-        }
-        return
-      }
-    }
-
-    // 轮询超时
-    console.error('❌ 轮询超时，任务可能仍在后台处理')
-    setIsGenerating(false)
-    setIsStreaming(false)
-    setAbortController(null)
-
-    const timeoutMessage = '生成超时：任务已在后台启动，请稍后刷新页面查看结果'
-    setError(timeoutMessage)
-
-    const timeoutAiMessage: Message = {
-      id: Date.now().toString(),
-      role: 'assistant',
-      content: `⏰ ${timeoutMessage}`,
-      timestamp: new Date()
-    }
-    setMessages(prev => [...prev, timeoutAiMessage])
-
-    if (conversationId) {
-      await saveMessageToConversation(conversationId, timeoutMessage)
-    }
-  }
-
-  // 同步生成代码，直接等待完成后再显示
+  // 同步生成代码，直接等待AI生成完整代码后再显示
   async function startDirectGeneration(prompt: string, conversationId: string) {
-    console.log('🎯 启动异步AI代码生成')
+    console.log('🎯 启动AI代码生成，等待完整生成...')
 
     try {
-      // 调用异步API生成代码（立即返回任务ID）
-      console.log('🚀 调用异步代码生成API...')
+      // 设置生成进度状态
+      setGenerationProgress({
+        message: 'AI正在生成高质量完整代码，请稍候...',
+        elapsed: 0
+      })
+
+      // 调用同步API，等待AI生成完成
+      console.log('🚀 调用AI代码生成API...')
       const response = await fetch('/api/generate-code-sync', {
         method: 'POST',
         headers: {
@@ -3219,18 +3186,45 @@ function GeneratePageContent() {
 
       if (result.code !== 0) {
         console.log(`❌ 业务失败: ${result.msg}`)
-        throw new Error(result.msg || '代码生成失败')
+        throw new Error(result.error || result.msg || '代码生成失败')
       }
 
-      const { taskId } = result.data
-      console.log(`📝 任务已创建，ID: ${taskId}`)
+      const { code: generatedCode, codeLength } = result.data
+      console.log(`✅ 代码生成完成，长度: ${codeLength}字符`)
 
-      // 开始轮询任务状态
-      await pollTaskStatus(taskId, prompt, conversationId)
+      // 设置最终结果状态
+      setGeneratedProject({
+        files: {
+          'src/App.tsx': generatedCode
+        },
+        projectName: 'GeneratedApp'
+      })
+      setSelectedFile('src/App.tsx')
+      setIsGenerating(false)
+      setIsStreaming(false)
+      setAbortController(null)
+      setGenerationProgress(null)
+
+      // 添加成功消息到对话
+      const aiMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: '✅ 代码生成完成！',
+        timestamp: new Date()
+      }
+      setMessages(prev => [...prev, aiMessage])
+
+      // 保存到数据库
+      if (conversationId) {
+        await saveMessageToConversation(conversationId, 'assistant', '代码生成完成！')
+      }
+
+      console.log('🎉 生成完成！')
 
     } catch (error: any) {
       if (error.name === 'AbortError') {
         console.log('用户取消生成')
+        setGenerationProgress(null)
         return
       }
 
@@ -3239,6 +3233,20 @@ function GeneratePageContent() {
       setIsGenerating(false)
       setIsStreaming(false)
       setAbortController(null)
+      setGenerationProgress(null)
+
+      // 添加错误消息到对话
+      const errorAiMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: `❌ 生成失败: ${error.message}`,
+        timestamp: new Date()
+      }
+      setMessages(prev => [...prev, errorAiMessage])
+
+      if (conversationId) {
+        await saveMessageToConversation(conversationId, `❌ 生成失败: ${error.message}`)
+      }
     }
   }
 

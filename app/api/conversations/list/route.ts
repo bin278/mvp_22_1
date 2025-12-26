@@ -22,19 +22,26 @@ export async function GET(request: NextRequest) {
     console.log("Fetching conversations for user:", user.id)
 
     // 获取用户的所有对话，按更新时间倒序
-    const result = await query("conversations", {
-      where: { user_id: user.id },
-      orderBy: "updated_at",
-      orderDirection: "desc"
-    })
+    let conversations = []
+    try {
+      const result = await query("conversations", {
+        where: { user_id: user.id },
+        orderBy: "updated_at",
+        orderDirection: "desc"
+      })
 
-    console.log("Successfully fetched", result.data.length, "conversations")
+      console.log("Successfully fetched", result.data.length, "conversations")
 
-    // 转换数据格式以保持兼容性
-    const conversations = result.data.map(conv => ({
-      id: conv._id,
-      ...conv
-    }))
+      // 转换数据格式以保持兼容性
+      conversations = result.data.map(conv => ({
+        id: conv._id,
+        ...conv
+      }))
+    } catch (dbError: any) {
+      console.warn("Database query failed, returning empty conversations list:", dbError.message)
+      // 如果数据库查询失败，返回空列表而不是报错
+      conversations = []
+    }
 
     return NextResponse.json({
       success: true,

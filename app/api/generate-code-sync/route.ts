@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import jwt from 'jsonwebtoken'
 import { randomUUID } from 'crypto'
-import { add } from '@/lib/database/cloudbase'
+import { add, getDatabase } from '@/lib/database/cloudbase'
 
 
 interface JWTPayload {
@@ -56,83 +56,47 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 生成任务ID
-    const taskId = randomUUID()
-    console.log('🔄 开始AI代码生成，任务ID:', taskId)
+    console.log('🚀 开始AI代码生成，等待完整生成...')
 
-    // 创建任务记录到数据库
     try {
-      await add('code_generation_tasks', {
-        taskId,
-        openid,
-        prompt: prompt.trim(),
-        status: 'processing',
-        createdAt: new Date(),
-        updatedAt: new Date()
-      })
-      console.log('📝 任务记录已创建:', taskId)
-    } catch (dbError: any) {
-      console.warn('⚠️ 创建任务记录失败:', dbError.message)
-    }
+      // 直接调用AI生成代码（同步等待完成）
+      const generatedCode = await generateCodeWithAI(prompt.trim())
 
-    // 异步执行代码生成（不等待结果）
-    generateCodeWithAI(prompt.trim()).then(async (generatedCode) => {
-      console.log('✅ 异步代码生成完成，任务ID:', taskId)
+      console.log('✅ AI代码生成完成')
 
+      // 保存生成记录到数据库
       try {
-        // 更新任务状态为完成
-        const db = getDatabase()
-        await db.collection('code_generation_tasks').doc(taskId).update({
-          status: 'completed',
-          code: generatedCode,
-          codeLength: generatedCode.length,
-          completedAt: new Date(),
-          updatedAt: new Date()
-        })
-
-        // 保存生成记录到历史表
         await add('code_generation_history', {
-          taskId,
           openid,
           prompt: prompt.trim(),
           code: generatedCode,
           codeLength: generatedCode.length,
           createdAt: new Date(),
-          method: 'async'
+          method: 'sync-full'
         })
-
-        console.log('📊 任务完成并保存到数据库:', taskId)
+        console.log('📊 生成历史已保存到数据库')
       } catch (dbError: any) {
-        console.error('❌ 保存生成结果失败:', dbError)
+        console.warn('⚠️ 保存生成历史失败，但不影响代码生成:', dbError.message)
       }
-    }).catch(async (error) => {
-      console.error('❌ 异步代码生成失败，任务ID:', taskId, error)
 
-      try {
-        // 更新任务状态为失败
-        const db = getDatabase()
-        await db.collection('code_generation_tasks').doc(taskId).update({
-          status: 'failed',
-          error: error.message,
-          failedAt: new Date(),
-          updatedAt: new Date()
-        })
-        console.log('📊 任务失败状态已更新:', taskId)
-      } catch (dbError: any) {
-        console.error('❌ 更新任务失败状态失败:', dbError)
-      }
-    })
+      // 返回完整的生成代码
+      return NextResponse.json({
+        code: 0,
+        msg: '代码生成成功',
+        data: {
+          code: generatedCode,
+          codeLength: generatedCode.length
+        }
+      })
 
-    // 立即返回任务ID给前端
-    return NextResponse.json({
-      code: 0,
-      msg: '代码生成任务已启动',
-      data: {
-        taskId,
-        status: 'processing',
-        message: 'AI正在生成代码，请稍候...'
-      }
-    })
+    } catch (error: any) {
+      console.error('❌ AI代码生成失败:', error)
+      return NextResponse.json({
+        code: -1,
+        msg: '代码生成失败',
+        error: error.message
+      }, { status: 500 })
+    }
 
   } catch (err: any) {
     console.error('同步生成请求失败:', err)
@@ -143,100 +107,238 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// AI代码生成函数（让AI完全生成完毕后再返回）
-async function generateCodeWithAI(prompt: string): Promise<string> {
-  const model = 'deepseek-chat' // 默认使用deepseek
 
-  // 获取API配置
+
+// 优化的AI代码生成（在60秒内完成）
+async function generateCodeWithAI(prompt: string): Promise<string> {
+  const model = 'deepseek-chat'
   let apiKey: string
   let baseUrl: string
   let client: any
 
-  // 获取DeepSeek配置
   apiKey = process.env.DEEPSEEK_API_KEY!
   baseUrl = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com'
 
-  // 创建OpenAI兼容客户端
   const OpenAI = require('openai')
   client = new OpenAI({
     apiKey: apiKey,
     baseURL: baseUrl,
   })
 
-  try {
-    console.log('🚀 开始AI代码生成，让AI完全生成完毕...')
+  console.log('🚀 开始优化的AI代码生成...')
 
-    // 直接调用AI，不设置主动超时，让CloudBase平台自然处理60秒超时
-    const completion = await client.chat.completions.create({
-      model: model,
-      messages: [
-        {
-          role: 'system',
-          content: `Generate a complete React component. Return ONLY the React component code, no explanations, no markdown, no JSON structure.
+  // 高质量代码生成参数（允许更长时间）
+  const completion = await client.chat.completions.create({
+    model: model,
+    messages: [
+      {
+        role: 'system',
+        content: `Generate a clean React component using JavaScript. Return ONLY the component code.
+
+IMPORTANT: Your response must be ONLY the raw JavaScript code - no markdown, no explanations, no comments about the code.
 
 Requirements:
-1. Use proper code formatting with consistent indentation (2 spaces)
-2. Include all necessary React imports
-3. Create a functional component with proper JSX structure
-4. Use Tailwind CSS classes for styling
-5. Make it immediately runnable
-6. Export as default
-7. Take your time to generate comprehensive, well-structured code
+1. Use plain JavaScript (no TypeScript, no interfaces, no type annotations)
+2. Use React hooks (useState, useEffect, etc.)
+3. Use functional components
+4. Include all necessary imports at the top
+5. Use Tailwind CSS classes for styling
+6. Export the component as default
+7. Make it production-ready with proper error handling
+8. Keep the code clean and well-formatted
+9. Do not include any comments or explanations in the code
 
-Example output:
-import React, { useState, useEffect } from 'react';
+Example structure:
+import React, { useState } from 'react';
 
-function Dashboard() {
-  const [data, setData] = useState([]);
-
-  useEffect(() => {
-    // Load data
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
-    // Implementation
-  };
-
+const ComponentName = () => {
+  const [state, setState] = useState(initialValue);
+  // component logic here
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold text-gray-900 mb-8">Dashboard</h1>
-        {/* Content */}
-      </div>
+    <div className="...">
+      {/* JSX here */}
     </div>
   );
+};
+
+export default ComponentName;
+
+Return ONLY this type of clean JavaScript code, nothing else.`
+      },
+      {
+        role: 'user',
+        content: prompt.trim()
+      }
+    ],
+    max_tokens: 4000, // 增加token限制以生成更完整的代码
+    temperature: 0.7, // 提高创造性，生成更丰富的代码
+  })
+
+  const content = completion.choices[0]?.message?.content
+  if (!content) {
+    throw new Error('No content generated from AI')
+  }
+
+  console.log('✅ AI代码生成完成，长度:', content.trim().length)
+
+  // 清理和提取真正的React组件代码
+  const cleanCode = extractReactComponentCode(content.trim())
+  console.log('🧹 代码清理完成，清理后长度:', cleanCode.length)
+
+  return cleanCode
 }
 
-export default Dashboard;`
-        },
-        {
-          role: 'user',
-          content: prompt.trim()
-        }
-      ],
-      max_tokens: parseInt(process.env.DEEPSEEK_MAX_TOKENS || '4000'), // 增加token限制
-      temperature: parseFloat(process.env.DEEPSEEK_TEMPERATURE || '0.7'), // 保持创造性
+// 更新任务成功状态
+async function updateTaskSuccess(taskId: string, generatedCode: string) {
+  try {
+    const db = getDatabase()
+    await db.collection('code_generation_tasks').doc(taskId).update({
+      status: 'completed',
+      code: generatedCode,
+      codeLength: generatedCode.length,
+      completedAt: new Date(),
+      updatedAt: new Date()
     })
-
-    console.log('✅ AI代码生成完成')
-
-    // 获取完整响应
-    const content = completion.choices[0]?.message?.content
-    if (!content) {
-      throw new Error('No content generated from AI')
-    }
-
-    return content.trim()
+    console.log('✅ 任务完成状态已更新:', taskId)
   } catch (error: any) {
-    console.error('AI生成失败:', error)
-
-    // 如果是网络超时或其他错误，给出相应提示
-    if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
-      throw new Error('网络请求超时，请稍后重试')
-    }
-
-    throw new Error(`AI生成失败: ${error.message}`)
+    console.error('❌ 更新任务成功状态失败:', error)
   }
+}
+
+// 更新任务失败状态
+async function updateTaskFailed(taskId: string, errorMessage: string) {
+  try {
+    const db = getDatabase()
+    await db.collection('code_generation_tasks').doc(taskId).update({
+      status: 'failed',
+      error: errorMessage,
+      failedAt: new Date(),
+      updatedAt: new Date()
+    })
+    console.log('❌ 任务失败状态已更新:', taskId)
+  } catch (error: any) {
+    console.error('❌ 更新任务失败状态失败:', error)
+  }
+}
+
+// 提取和清理React组件代码
+function extractReactComponentCode(rawContent: string): string {
+  let code = rawContent.trim()
+
+  console.log('🔍 开始清理AI生成的代码...')
+  console.log('原始内容长度:', code.length)
+  console.log('原始内容预览:', code.substring(0, 300) + (code.length > 300 ? '...' : ''))
+
+  // 1. 尝试从markdown代码块中提取代码
+  const markdownRegex = /```(?:jsx?|typescript|ts|js)?\n?([\s\S]*?)```/g
+  const markdownMatches = [...code.matchAll(markdownRegex)]
+
+  if (markdownMatches.length > 0) {
+    // 找到最长的代码块，通常是主要的组件代码
+    let longestMatch = markdownMatches[0][1]
+    for (const match of markdownMatches) {
+      if (match[1].length > longestMatch.length) {
+        longestMatch = match[1]
+      }
+    }
+    code = longestMatch.trim()
+    console.log('📦 从markdown代码块提取了代码')
+  }
+
+  // 2. 移除常见的AI生成的前缀和后缀
+  code = code
+    // 移除代码块外的解释文本
+    .replace(/^(?:Here's|Here is|Below is|This is|I created|I've created|Here's a|Here is a).*?(?:component|code|React component):\s*/im, '')
+    .replace(/^(?:The following|Following).*?(?:component|code):\s*/im, '')
+    // 移除行首的说明文字
+    .replace(/^.*?(?:component|code) (?:that|which|with).*?:\s*/im, '')
+    // 移除结尾的解释
+    .replace(/\n\n.*?(?:This|The).*?(?:component|code).*?(?:provides|includes|features|uses).*?$/s, '')
+    .replace(/\n\n.*?(?:You can|To use|The component).*?$/s, '')
+
+  // 3. 移除多余的空行
+  code = code.replace(/\n{3,}/g, '\n\n')
+
+  // 4. 确保代码以import或function或const开头
+  const lines = code.split('\n').filter(line => line.trim())
+
+  // 查找第一个有意义的代码行
+  let startIndex = 0
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (line.startsWith('import') ||
+        line.startsWith('export') ||
+        line.startsWith('function') ||
+        line.startsWith('const') ||
+        line.startsWith('interface') ||
+        line.startsWith('type') ||
+        line.includes('=') && line.includes('=>') ||
+        line.includes('React.') ||
+        line.includes('<') && line.includes('>')) {
+      startIndex = i
+      break
+    }
+  }
+
+  // 从有意义的代码行开始
+  code = lines.slice(startIndex).join('\n')
+
+  // 5. 移除结尾的注释和多余内容
+  code = code
+    .replace(/\n\/\/.*?(?:This|The).*?(?:component|code).*?(?:is|provides|includes).*?$/s, '')
+    .replace(/\n\/\*.*?(?:This|The).*?(?:component|code).*?(?:is|provides|includes).*?\*\//s, '')
+
+  // 6. 最后的清理
+  code = code.trim()
+
+  // 7. 额外的清理 - 移除AI可能添加的额外内容
+  // 移除代码顶部的多余注释
+  code = code.replace(/^\/\*[\s\S]*?\*\/\s*/m, '')
+  code = code.replace(/^\/\/.*$/gm, '')
+
+  // 移除可能的语言标识
+  code = code.replace(/^javascript\s*/im, '')
+  code = code.replace(/^js\s*/im, '')
+
+  // 移除可能的代码块标记
+  code = code.replace(/^```\w*\s*$/gm, '')
+  code = code.replace(/^```\s*$/gm, '')
+
+  // 8. 移除TypeScript语法（以防AI仍然生成TS代码）
+  // 移除interface定义
+  code = code.replace(/interface\s+\w+\s*\{[^}]*\};?\s*/g, '')
+  // 移除type定义
+  code = code.replace(/type\s+\w+\s*=.*;\s*/g, '')
+
+  // 更精确地移除TypeScript类型注解
+  // 移除函数参数类型注解，如 (param: string) => (param)
+  code = code.replace(/\(\s*\w+\s*:\s*[^,)]+/g, '(')
+  // 移除变量声明类型注解，如 const x: string = (const x =)
+  code = code.replace(/(const|let|var)\s+(\w+)\s*:\s*[^=]+=\s*/g, '$1 $2 = ')
+  // 移除React.FC类型注解
+  code = code.replace(/:\s*React\.FC(\<[^>]*\>)?/g, '')
+  // 移除其他常见的类型注解模式
+  code = code.replace(/(\w+)\s*:\s*\w+(\[\])?\s*=\s*/g, '$1 = ')
+
+  // 移除泛型尖括号，但保留JSX中的尖括号
+  // 这是一个简化版本，避免误删JSX
+  code = code.replace(/<(\w+)\s*extends\s*[^>]*>/g, '') // 移除extends泛型
+  code = code.replace(/<(\w+)\s*,?\s*\w+\s*>/g, '') // 移除简单泛型
+
+  // 8. 验证代码是否合理
+  const hasReactImport = code.includes('import React') || code.includes("from 'react'")
+  const hasComponent = code.includes('function') || code.includes('const') || code.includes('export')
+  const hasJSX = code.includes('<') && code.includes('>')
+
+  if (!hasComponent || !hasJSX) {
+    console.warn('⚠️ 提取的代码可能不完整，hasComponent:', hasComponent, 'hasJSX:', hasJSX)
+    // 如果提取失败，返回原始内容
+    return rawContent.trim()
+  }
+
+  console.log('✅ 代码清理完成，清理后长度:', code.length)
+  console.log('🔍 代码预览:', code.substring(0, 200) + (code.length > 200 ? '...' : ''))
+
+  return code
 }
 
