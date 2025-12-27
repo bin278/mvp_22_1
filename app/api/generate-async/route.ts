@@ -41,7 +41,11 @@ interface GenerationTask {
 }
 
 // 全局任务队列（生产环境应该用Redis或数据库）
-export const taskQueue = new Map<string, GenerationTask>()
+// 使用全局变量避免热重载时的重置
+if (!(global as any).taskQueue) {
+  (global as any).taskQueue = new Map<string, GenerationTask>()
+}
+export const taskQueue = (global as any).taskQueue as Map<string, GenerationTask>
 
 // AI客户端初始化
 function getAIClient(model: string) {
@@ -78,8 +82,8 @@ function formatCodeString(code: string): string {
 }
 
 // 创建项目结构
-function createProjectFromCode(code: string) {
-  return {
+function createProjectFromCode(code: string, isModification: boolean = false) {
+  const project = {
     files: {
       'src/App.tsx': code,
       'src/index.css': `body {
@@ -102,6 +106,13 @@ code {
     },
     projectName: 'smart-generated-app'
   }
+
+  // 如果是修改任务，添加标记
+  if (isModification) {
+    (project as any).isModification = true
+  }
+
+  return project
 }
 
 // 异步代码生成
@@ -173,6 +184,7 @@ export default App;`
 
 // 开始异步生成任务
 export async function POST(request: NextRequest) {
+  console.log('📥 收到异步生成请求')
   try {
     // 认证
     const authResult = await requireAuth(request)
@@ -184,7 +196,8 @@ export async function POST(request: NextRequest) {
     }
 
     const user = authResult.user
-    const { prompt, model, conversationId, existingContent } = await request.json()
+    const { prompt, model, conversationId, existingContent, isModification, originalCode } = await request.json()
+    console.log('📝 请求参数:', { prompt: prompt.substring(0, 50) + '...', model, conversationId, isModification })
 
     // 生成唯一任务ID
     const taskId = `async_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
@@ -204,9 +217,15 @@ export async function POST(request: NextRequest) {
 
     // 存储到队列
     taskQueue.set(taskId, task)
+    console.log(`✅ 任务已存储到全局队列: ${taskId}, 队列大小: ${taskQueue.size}`)
 
-    // 异步执行任务
-    processAsyncTask(task, existingContent)
+    // 异步执行任务（不等待，避免阻塞API响应）
+    setImmediate(() => {
+      console.log(`🚀 开始异步处理任务: ${taskId}, isModification: ${!!existingContent}`)
+      processAsyncTask(task, existingContent, !!existingContent).catch(error => {
+        console.error('异步任务处理失败:', error)
+      })
+    })
 
     return NextResponse.json({
       success: true,
@@ -225,7 +244,7 @@ export async function POST(request: NextRequest) {
 }
 
 // 处理异步任务
-async function processAsyncTask(task: GenerationTask, existingContent?: string) {
+async function processAsyncTask(task: GenerationTask, existingContent?: string, isModification: boolean = false) {
   try {
     // 更新状态为运行中
     task.status = TaskStatus.RUNNING
@@ -247,6 +266,8 @@ async function processAsyncTask(task: GenerationTask, existingContent?: string) 
       ? `Continue generating from this existing code:\n\n${existingContent}\n\nAdditional requirements: ${task.prompt}`
       : task.prompt
 
+    console.log(`🎯 处理任务类型: ${isModification ? '修改' : '生成'}, 现有内容长度: ${existingContent?.length || 0}`)
+
     // 生成代码
     const result = await generateCodeAsync(
       fullPrompt,
@@ -265,10 +286,13 @@ async function processAsyncTask(task: GenerationTask, existingContent?: string) 
       }
     )
 
+    // 创建结果项目，包含修改标记
+    const projectResult = createProjectFromCode(result.files['src/App.tsx'] || result.files[Object.keys(result.files)[0]], isModification)
+
     // 完成任务
     task.status = TaskStatus.COMPLETED
     task.progress = 100
-    task.result = result
+    task.result = projectResult
     task.completedAt = new Date().toISOString()
     task.updatedAt = new Date().toISOString()
     taskQueue.set(task.taskId, task)

@@ -20,10 +20,15 @@ export async function GET(
     const user = authResult.user
     const { taskId } = await params
 
+    console.log(`🔍 查询任务: ${taskId}, 用户: ${user.id}, 全局队列大小: ${taskQueue.size}`)
+    console.log('🔍 队列中的所有任务ID:', Array.from(taskQueue.keys()))
+
     // 从队列获取任务状态
     const task = taskQueue.get(taskId)
+    console.log(`📋 任务查询结果:`, task ? { status: task.status, userId: task.userId } : 'null')
 
     if (!task) {
+      console.log(`❌ 任务不存在: ${taskId}`)
       return NextResponse.json(
         { error: '任务不存在' },
         { status: 404 }

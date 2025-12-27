@@ -181,19 +181,14 @@ function GeneratePageContent() {
   }
   const [prompt, setPrompt] = useState("")
   const [isGenerating, setIsGenerating] = useState(false)
-  const [generationProgress, setGenerationProgress] = useState<{message: string, elapsed: number} | null>(null)
   const [generatedProject, setGeneratedProject] = useState<GeneratedProject | null>(null)
   const [copied, setCopied] = useState(false)
   const [selectedFile, setSelectedFile] = useState<string>("src/App.tsx")
   const [previewUrl, setPreviewUrl] = useState<string>("")
   const [showTips, setShowTips] = useState(false)
 
-  // 分段生成状态
-  const [currentSegment, setCurrentSegment] = useState<number>(0)
-  const [totalSegments, setTotalSegments] = useState<number>(0)
   const [messages, setMessages] = useState<Message[]>([])
   const [previewPrompt, setPreviewPrompt] = useState<string>("")
-  const [generationWarning, setGenerationWarning] = useState<string>("")
   const [abortController, setAbortController] = useState<AbortController | null>(null)
   const [modifyInstruction, setModifyInstruction] = useState("")
   const [modifyingCode, setModifyingCode] = useState("")
@@ -203,8 +198,7 @@ function GeneratePageContent() {
   // 异步任务相关状态
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
   const [asyncTaskId, setAsyncTaskId] = useState<string | null>(null)
-  const [generationMode, setGenerationMode] = useState<'streaming' | 'async' | 'hybrid'>('streaming')
-  const [asyncProgress, setAsyncProgress] = useState<number>(0)
+  const [generationMode, setGenerationMode] = useState<'async'>('async')
 
   // 模型选择和订阅状态
   const [selectedModel, setSelectedModel] = useState<string>(getDefaultModel('free'))
@@ -214,14 +208,10 @@ function GeneratePageContent() {
   const [previewScale, setPreviewScale] = useState(1)
   const [isLivePreviewEnabled, setIsLivePreviewEnabled] = useState(true)
   const [lastPreviewCode, setLastPreviewCode] = useState<string>('')
-  const [streamingCode, setStreamingCode] = useState<string>('')
-  const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const previewRefreshTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const isManualRefreshRef = useRef<boolean>(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const sseRef = useRef<EventSource | null>(null)
-  const modificationSSERef = useRef<EventSource | null>(null)
 
   // 解析markdown链接的函数
   const renderContentWithLinks = (content: string) => {
@@ -294,76 +284,83 @@ function GeneratePageContent() {
 
   // 异步任务相关函数
   // SSE监听异步任务状态
-  const startSSEListening = (taskId: string) => {
-    console.log(`🔄 建立SSE连接监听任务: ${taskId}`)
-    setIsGenerating(true)
-    setGenerationMode('async')
 
-    // 关闭之前的SSE连接
-    if (sseRef.current) {
-      sseRef.current.close()
-    }
+  // 轮询检查任务状态
+  const pollTaskStatus = async (taskId: string) => {
+    // 延迟2秒开始轮询，给后端时间创建和开始处理任务
+    setTimeout(async () => {
+      let pollCount = 0
+      let consecutive404Count = 0
+      const maxPolls = 150 // 5分钟 (150 * 2秒)
+      const maxConsecutive404 = 5 // 最多连续5次404
 
-    // 创建EventSource连接，携带认证token
-    const token = authSession?.accessToken || ''
-    const eventSource = new EventSource(`/api/generate-async/${taskId}/stream?token=${encodeURIComponent(token)}`)
+      const pollInterval = setInterval(async () => {
+        pollCount++
 
-    eventSource.onopen = () => {
-      console.log('📡 SSE连接已建立')
-    }
+        try {
+          const response = await fetch(`/api/generate-async/${taskId}`, {
+            headers: {
+              'Authorization': `Bearer ${authSession?.accessToken || ''}`,
+            },
+          })
 
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        console.log('📨 收到SSE消息:', data)
+          if (response.ok) {
+            consecutive404Count = 0 // 重置404计数
+            const status = await response.json()
 
-        switch (data.type) {
-          case 'connected':
-            console.log('✅ SSE连接确认')
-            break
+            if (status.status === 'completed' && status.result) {
+              clearInterval(pollInterval)
+              handleAsyncTaskCompleted({
+                taskId,
+                status: 'completed',
+                progress: 100,
+                result: status.result
+              })
+            } else if (status.status === 'failed') {
+              clearInterval(pollInterval)
+              setError(status.error || '生成失败，请重试')
+              setIsGenerating(false)
+              setCurrentTaskId(null)
+              setAsyncTaskId(null)
+            }
+            // 如果还是running或pending，继续轮询
+          } else if (response.status === 404) {
+            consecutive404Count++
 
-          case 'status_update':
-            setAsyncProgress(data.progress || 0)
-            console.log(`📊 任务状态: ${data.message}`)
-            break
+            // 如果连续多次404，认为任务可能有问题
+            if (consecutive404Count >= maxConsecutive404) {
+              clearInterval(pollInterval)
+              setError('任务创建失败，请重试')
+              setIsGenerating(false)
+              setCurrentTaskId(null)
+              setAsyncTaskId(null)
+            }
+          } else {
+            // 其他错误，继续轮询
+          }
 
-          case 'progress_update':
-            setAsyncProgress(data.progress || 0)
-            console.log(`📈 进度更新: ${data.message}`)
-            break
-
-          case 'completed':
-            console.log(`✅ 异步任务完成: ${taskId}`)
-            eventSource.close()
-            handleAsyncTaskCompleted({ ...data, taskId, status: 'completed', content: JSON.stringify(data.result) })
-            break
-
-          case 'failed':
-            console.error(`❌ 异步任务失败: ${taskId}`, data.error)
-            eventSource.close()
-            setError(data.message || '生成失败，请重试')
+          // 检查是否超过最大轮询次数
+          if (pollCount >= maxPolls) {
+            clearInterval(pollInterval)
+            setError('生成超时，请重试')
             setIsGenerating(false)
-            setGenerationMode('streaming')
             setCurrentTaskId(null)
             setAsyncTaskId(null)
-            break
+          }
+        } catch (error) {
+          pollCount++
+
+          // 如果网络错误，继续轮询几次
+          if (pollCount >= maxPolls) {
+            clearInterval(pollInterval)
+            setError('网络错误，请检查连接后重试')
+            setIsGenerating(false)
+            setCurrentTaskId(null)
+            setAsyncTaskId(null)
+          }
         }
-      } catch (error) {
-        console.error('解析SSE消息失败:', error)
-      }
-    }
-
-    eventSource.onerror = (error) => {
-      console.error('SSE连接错误:', error)
-      eventSource.close()
-
-      // SSE连接失败，设置错误状态
-      setError('网络连接失败，请重试')
-      setIsGenerating(false)
-    }
-
-    // 存储EventSource引用
-    sseRef.current = eventSource
+      }, 2000) // 每2秒检查一次
+    }, 2000) // 延迟2秒开始轮询
   }
 
   // 取消异步生成
@@ -381,10 +378,9 @@ function GeneratePageContent() {
       })
 
       setIsGenerating(false)
-      setGenerationMode('streaming')
+      setGenerationMode('async')
       setCurrentTaskId(null)
       setAsyncTaskId(null)
-      setAsyncProgress(0)
       setError('异步生成已取消')
 
     } catch (error) {
@@ -393,33 +389,87 @@ function GeneratePageContent() {
   }
 
   // 处理异步任务完成
-  const handleAsyncTaskCompleted = (status: TaskStatus) => {
+  const handleAsyncTaskCompleted = async (status: TaskStatus) => {
     if (status.result) {
       console.log('📦 处理异步任务结果')
 
-      setGeneratedProject(status.result)
-      setSelectedFile('src/App.tsx')
-      setIsGenerating(false)
-      setGenerationMode('streaming') // 重置为流式模式
-      setCurrentTaskId(null)
-      setAsyncTaskId(null)
-      setAsyncProgress(0)
+      // 检查是否是修改任务
+      const isModification = status.result.isModification || false
 
-      // 显示成功消息
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: `✅ 代码生成完成！使用了智能异步模式以确保稳定性。`,
-        timestamp: new Date()
-      }])
+      if (isModification) {
+        // 修改任务：更新现有项目中的特定文件
+        console.log('🔧 处理代码修改结果')
+        setGeneratedProject(prev => {
+          if (!prev) return status.result
+          const updatedFiles = {
+            ...prev.files,
+            [selectedFile]: status.result.files[selectedFile] || status.result.files['src/App.tsx'] || ''
+          }
+          return {
+            ...prev,
+            files: updatedFiles
+          }
+        })
+        setIsModifying(false)
 
-      // 自动打开预览
-      if (status.result?.files?.['src/App.tsx']) {
-        setTimeout(() => {
-          setPreviewPrompt(prompt.trim())
-          setIsPreviewLoading(true)
-        }, 1000)
+        // 显示修改成功消息
+        const modifyMessageContent = language === 'en'
+          ? `✅ Code has been modified successfully!`
+          : `✅ 代码已成功修改！`
+        setMessages(prev => {
+          const newMessages = [...prev]
+          // Find the last AI message and update it
+          for (let i = newMessages.length - 1; i >= 0; i--) {
+            if (newMessages[i].role === 'assistant') {
+              newMessages[i] = {
+                ...newMessages[i],
+                content: modifyMessageContent,
+                timestamp: new Date()
+              }
+              break
+            }
+          }
+          return newMessages
+        })
+
+        // 保存修改结果到数据库
+        if (currentConversationId) {
+          console.log('💾 Saving code modification to conversation:', currentConversationId)
+          await saveMessageToConversation(currentConversationId, 'assistant', modifyMessageContent)
+          // 只保存修改的文件
+          const modifiedFiles = { [selectedFile]: status.result.files[selectedFile] || status.result.files['src/App.tsx'] || '' }
+          await saveFilesToConversation(currentConversationId, modifiedFiles)
+        }
+      } else {
+        // 生成任务：设置新项目
+        console.log('🚀 处理代码生成结果')
+        setGeneratedProject(status.result)
+        setSelectedFile('src/App.tsx')
+        setIsGenerating(false)
+        setGenerationMode('async')
+        setCurrentTaskId(null)
+        setAsyncTaskId(null)
+
+        // 显示生成成功消息
+        const generateMessageContent = `✅ 代码生成完成！使用了智能异步模式以确保稳定性。`
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: generateMessageContent,
+          timestamp: new Date()
+        }])
+
+        // 保存生成结果到数据库
+        if (currentConversationId) {
+          console.log('💾 Saving code generation to conversation:', currentConversationId)
+          await saveMessageToConversation(currentConversationId, 'assistant', generateMessageContent)
+          await saveFilesToConversation(currentConversationId, status.result.files)
+        }
       }
+
+      // 不再自动打开预览（避免加载缓慢）
+      // 用户可以手动点击预览按钮来查看
+      console.log(isModification ? '代码修改完成' : '代码生成完成', '，用户可以手动点击预览按钮查看结果')
     }
   }
 
@@ -850,7 +900,8 @@ function GeneratePageContent() {
     const controller = new AbortController()
     setAbortController(controller)
     setIsGenerating(true)
-    setGeneratedProject(null)
+    // 不要立即清除项目，让用户可以继续查看之前的代码
+    // setGeneratedProject(null)
 
     // 确保有对话ID，如果没有则创建新对话
     let conversationIdToUse = currentConversationId
@@ -901,12 +952,10 @@ function GeneratePageContent() {
     console.log('💾 Saving user message to conversation:', conversationIdToUse)
     await saveMessageToConversation(conversationIdToUse, 'user', trimmedPrompt)
 
-    // 直接使用异步模式生成代码（避免CloudBase超时限制）
-    console.log('🚀 使用异步模式生成代码（避免超时）')
+    // 统一使用异步模式生成代码
+    console.log('🚀 使用异步模式生成代码')
     setGenerationMode('async')
-    setIsStreaming(false)
 
-    // 直接调用异步生成，传入正确的参数
     try {
       const response = await fetch('/api/generate-async', {
         method: 'POST',
@@ -932,384 +981,15 @@ function GeneratePageContent() {
       setCurrentTaskId(taskId)
       setAsyncTaskId(taskId)
 
-      // 建立SSE连接监听任务状态
-      startSSEListening(taskId)
+      // 开始轮询检查任务状态
+      pollTaskStatus(taskId)
 
     } catch (error) {
       console.error('异步生成启动失败:', error)
       setError('异步生成启动失败，请重试')
       setIsGenerating(false)
-      setGenerationMode('streaming')
-    }
-
-    try {
-      // 先使用测试API检查连接
-      console.log('🧪 Testing API connectivity...')
-      const testResponse = await fetch('/api/test-generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ test: 'hello' })
-      })
-
-      if (!testResponse.ok) {
-        throw new Error(`API connectivity test failed: ${testResponse.status}`)
-      }
-
-      const testResult = await testResponse.json()
-      console.log('✅ API connectivity test passed:', testResult)
-
-      // 然后使用调试API检查请求
-      console.log('🔍 Sending debug request first...')
-      const debugResponse = await fetch('/api/debug-generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          prompt: prompt.trim(),
-          model: selectedModel
-        }),
-      })
-
-      const debugResult = await debugResponse.json()
-      console.log('🔍 Debug response:', debugResult)
-
-      if (!debugResult.success) {
-        throw new Error(`Validation failed: ${debugResult.error}`)
-      }
-
-      console.log('🚀 Sending generate request:', {
-        prompt: prompt.trim(),
-        model: selectedModel,
-        userTier: userSubscriptionTier,
-        hasAuth: !!authSession?.accessToken
-      });
-
-      const response = await fetch('/api/generate-stream', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authSession?.accessToken || ''}`,
-        },
-        body: JSON.stringify({
-          prompt: prompt.trim(),
-          model: selectedModel,
-          conversationId: conversationIdToUse
-        }),
-        signal: controller.signal,
-      })
-
-      if (!response.ok) {
-        // Try to parse error response
-        try {
-          const errorData = await response.json()
-          const errorMessage = errorData.error || 'Failed to generate code'
-          const error = new Error(errorMessage)
-          ;(error as any).details = errorData.details || errorMessage
-          ;(error as any).statusCode = response.status
-          throw error
-        } catch (parseError) {
-          // If we can't parse the error response, use a generic message
-          throw new Error(`Failed to generate code (${response.status})`)
-        }
-      }
-
-      const reader = response.body?.getReader()
-      const decoder = new TextDecoder()
-      let streamingCodeBuffer = ''
-      let lastDataTime = Date.now()
-      let reconnectAttempts = 0
-      const MAX_RECONNECT = 3
-      const CONNECTION_TIMEOUT = 30000 // 30秒无数据视为连接断开
-      let connectionCheckInterval: NodeJS.Timeout | null = null
-
-      if (!reader) {
-        throw new Error('No response body reader available')
-      }
-
-      // 连接检测定时器 - 防止生产环境连接中断
-      connectionCheckInterval = setInterval(() => {
-        const timeSinceLastData = Date.now() - lastDataTime
-        if (timeSinceLastData > CONNECTION_TIMEOUT) {
-          console.warn(`⚠️ 生产环境连接检测: ${Math.round(timeSinceLastData/1000)}秒无数据，可能是网络代理中断`)
-
-          if (reconnectAttempts < MAX_RECONNECT) {
-            reconnectAttempts++
-            console.log(`🔄 生产环境自动重连 (${reconnectAttempts}/${MAX_RECONNECT})`)
-
-            // 取消当前流式请求
-            controller.abort()
-            if (connectionCheckInterval) {
-        clearInterval(connectionCheckInterval)
-      }
-
-            // 显示重连提示
-            setError(`网络连接不稳定，正在重连 (${reconnectAttempts}/${MAX_RECONNECT})...`)
-
-            // 重连失败，设置错误状态
-            setTimeout(() => {
-              setError('网络连接失败，请检查网络后重试')
-              setIsStreaming(false)
-              setIsGenerating(false)
-            }, 2000)
-          } else {
-            console.error('❌ 生产环境重连失败次数过多')
-            setError('网络连接失败，请检查网络后重试')
-            setIsStreaming(false)
-            setIsGenerating(false)
-            if (connectionCheckInterval) {
-        clearInterval(connectionCheckInterval)
-      }
-          }
-        }
-      }, 5000) // 每5秒检查一次连接
-
-      while (true) {
-        const { done, value } = await reader.read()
-
-        if (done) {
-          break
-        }
-
-        const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split('\n')
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6)
-
-            if (data === '[DONE]') {
-              break
-            }
-
-            try {
-              const parsedData = JSON.parse(data)
-
-              if (parsedData.type === 'chars') {
-                // 优化: 批量处理字符，更高效
-                streamingCodeBuffer += parsedData.chars
-                setStreamingCode(streamingCodeBuffer)
-
-                // 更新最后数据时间（用于连接检测）
-                lastDataTime = Date.now()
-              } else if (parsedData.type === 'char') {
-                // 兼容旧的单字符模式
-                streamingCodeBuffer += parsedData.char
-                setStreamingCode(streamingCodeBuffer)
-
-                // 更新最后数据时间
-                lastDataTime = Date.now()
-              } else if (parsedData.type === 'heartbeat') {
-                // 收到心跳包，更新连接状态
-                lastDataTime = Date.now()
-                console.log('❤️ 收到心跳包，连接正常')
-                continue
-              } else if (parsedData.type === 'mode_switch') {
-                // 智能切换模式
-                console.log(`🔄 后端要求切换到 ${parsedData.mode} 模式: ${parsedData.reason}`)
-                setGenerationMode(parsedData.mode)
-
-                if (parsedData.mode === 'async') {
-                  // 切换到异步模式
-                  setIsStreaming(false)
-                  setAsyncProgress(0)
-                  setCurrentTaskId(parsedData.taskId)
-                }
-                continue
-              } else if (parsedData.type === 'async_task_ready') {
-                // 异步任务已准备就绪
-                console.log(`✅ 异步任务准备就绪: ${parsedData.asyncTaskId}`)
-                setAsyncTaskId(parsedData.asyncTaskId)
-                continue
-              }
-
-              // Auto-scroll to bottom (只在有实际内容时滚动)
-              if (parsedData.type === 'chars' || parsedData.type === 'char') {
-                setTimeout(() => {
-                  const codeContainer = document.querySelector('.overflow-auto')
-                  if (codeContainer) {
-                    codeContainer.scrollTop = codeContainer.scrollHeight
-                  }
-                }, 0)
-              } else if (parsedData.type === 'complete') {
-                // Final project data received
-                const project = parsedData.project
-
-                setGeneratedProject(project)
-                setSelectedFile('src/App.tsx')
-                setPreviewPrompt(prompt.trim())
-                setStreamingCode('')
-                setIsStreaming(false)
-
-                // Add AI response to conversation history
-                const aiMessageContent = language === 'en'
-                  ? `✅ Generated ${Object.keys(project.files).length} files successfully!`
-                  : `✅ 成功生成 ${Object.keys(project.files).length} 个文件！`
-                
-                const aiMessage: Message = {
-                  id: (Date.now() + 1).toString(),
-                  role: 'assistant',
-                  content: aiMessageContent,
-                  timestamp: new Date()
-                }
-                setMessages(prev => [...prev, aiMessage])
-                
-                // 保存AI消息和文件到数据库
-                if (conversationIdToUse) {
-                  console.log('💾 Saving AI response to conversation:', conversationIdToUse)
-                  await saveMessageToConversation(conversationIdToUse, 'assistant', aiMessageContent)
-                  await saveFilesToConversation(conversationIdToUse, project.files)
-                }
-
-                // Auto-open preview if live preview is enabled
-                if (isLivePreviewEnabled && project?.files?.['src/App.tsx']) {
-                  setTimeout(async () => {
-                    const currentCode = project.files['src/App.tsx'] || ''
-                    if (currentCode) {
-                      setIsPreviewLoading(true)
-                      setPreviewError(null)
-                      
-                      try {
-                        if (previewUrl) {
-                          URL.revokeObjectURL(previewUrl)
-                          setPreviewUrl('')
-                        }
-                        
-                        const previewResponse = await fetch('/api/preview-code', {
-                          method: 'POST',
-                          headers: {
-                            'Content-Type': 'application/json',
-                          },
-                          body: JSON.stringify({
-                            code: currentCode,
-                            files: project.files,
-                          }),
-                        })
-                        
-                        if (previewResponse.ok) {
-                          const previewHtml = await previewResponse.text()
-                          const blob = new Blob([previewHtml], { type: 'text/html' })
-                          const url = URL.createObjectURL(blob)
-                          setPreviewUrl(url)
-                        }
-                      } catch (error: any) {
-                        console.error('Auto-preview error:', error)
-                      } finally {
-                        setIsPreviewLoading(false)
-                      }
-                    }
-                  }, 500)
-                }
-
-                // Keep the input after successful generation for further modifications
-                // setPrompt("")
-
-              } else if (parsedData.type === 'error') {
-                const errorMsg = parsedData.error || 'Generation error occurred'
-                const errorDetails = parsedData.details || errorMsg
-                const statusCode = parsedData.statusCode
-                
-                // Create a more detailed error object
-                const detailedError = new Error(errorMsg)
-                ;(detailedError as any).details = errorDetails
-                ;(detailedError as any).statusCode = statusCode
-                
-                throw detailedError
-              }
-            } catch (parseError) {
-              console.warn('Failed to parse streaming data:', parseError)
-            }
-          }
-        }
-      }
-
-    } catch (error: any) {
-
-      if (error.name === 'AbortError') {
-        console.log('Generation cancelled by user')
-        return
-      }
-      console.error('Error generating code:', error)
-      
-      // Determine error message based on error type
-      let errorMessage = error.message || 'Failed to generate code'
-      let errorDetails = error.details || errorMessage
-      let alertMessage = ''
-      
-      if (error.statusCode === 402) {
-        errorMessage = language === 'en' 
-          ? 'Insufficient API Balance'
-          : 'API 余额不足'
-        errorDetails = language === 'en'
-          ? 'Your API account has insufficient balance. Please top up your account to continue using the service.'
-          : '您的 API 账户余额不足。请充值后继续使用服务。'
-        alertMessage = language === 'en'
-          ? 'Insufficient API Balance. Please top up your account.'
-          : 'API 余额不足，请充值账户。'
-      } else if (error.statusCode === 401) {
-        errorMessage = language === 'en'
-          ? 'Invalid API Key'
-          : 'API 密钥无效'
-        errorDetails = language === 'en'
-          ? 'The API key is invalid or expired. Please check your API configuration.'
-          : 'API 密钥无效或已过期。请检查您的 API 配置。'
-        alertMessage = language === 'en'
-          ? 'Invalid API Key. Please check your configuration.'
-          : 'API 密钥无效，请检查配置。'
-      } else if (error.statusCode === 403) {
-        errorMessage = language === 'en'
-          ? 'Access Denied'
-          : '访问被拒绝'
-        errorDetails = language === 'en'
-          ? 'You do not have permission to use the selected model. Please upgrade your subscription.'
-          : '您没有权限使用所选模型。请升级您的订阅。'
-        alertMessage = language === 'en'
-          ? 'Access denied. Please upgrade your subscription to use this model.'
-          : '访问被拒绝，请升级订阅以使用此模型。'
-      } else if (error.statusCode === 429) {
-        errorMessage = language === 'en'
-          ? 'Rate Limit Exceeded'
-          : '请求频率超限'
-        errorDetails = language === 'en'
-          ? 'Too many requests. Please wait a moment and try again.'
-          : '请求过于频繁。请稍候再试。'
-        alertMessage = language === 'en'
-          ? 'Rate limit exceeded. Please wait and try again.'
-          : '请求频率超限，请稍候再试。'
-      } else {
-        alertMessage = language === 'en'
-          ? `Failed to generate code: ${errorMessage}`
-          : `生成代码失败：${errorMessage}`
-      }
-      
-      // Add error message to conversation
-      const errorContent = language === 'en'
-        ? `❌ ${errorMessage}\n\n${errorDetails}`
-        : `❌ ${errorMessage}\n\n${errorDetails}`
-      const errorMsg: Message = {
-        id: (Date.now() + 2).toString(),
-        role: 'assistant',
-        content: errorContent,
-        timestamp: new Date()
-      }
-      setMessages(prev => [...prev, errorMsg])
-      
-      // 保存错误消息到数据库
-      if (currentConversationId) {
-        await saveMessage('assistant', errorContent)
-      }
-      
-      alert(alertMessage || (language === 'en' 
-        ? 'Failed to generate code. Please try again.'
-        : '生成代码失败，请重试。'))
     } finally {
-      setIsGenerating(false)
-      setIsStreaming(false)
       setAbortController(null)
-    setCurrentSegment(0)
-    setTotalSegments(0)
     }
   }
 
@@ -1514,97 +1194,39 @@ function GeneratePageContent() {
     setIsModifying(true)
 
     try {
-      console.log('🔧 调用同步代码修改API...')
-      const response = await fetch('/api/modify-code', {
+      // 使用异步API进行代码修改
+      console.log('🔧 使用异步API进行代码修改...')
+
+      const response = await fetch('/api/generate-async', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authSession?.accessToken || ''}`,
         },
         body: JSON.stringify({
-          code: currentCode,
-          instruction: modifyInstruction.trim()
-        })
-        // 移除signal以避免意外取消
+          prompt: `Modify the following code according to this instruction: "${modifyInstruction.trim()}". Here is the current code:\n\n${currentCode}`,
+          model: selectedModel,
+          conversationId: currentConversationId,
+          isModification: true,
+          originalCode: currentCode
+        }),
       })
 
-      console.log(`📤 修改API响应状态: ${response.status}`)
-
       if (!response.ok) {
-        const errorText = await response.text()
-        console.log(`❌ API调用失败响应: ${errorText}`)
-        throw new Error(`API调用失败: ${response.status}`)
+        throw new Error(`HTTP ${response.status}`)
       }
 
       const result = await response.json()
-      console.log(`📋 修改API响应: ${JSON.stringify(result)}`)
+      const taskId = result.taskId
 
-      if (result.code !== 0) {
-        console.log(`❌ 业务失败: ${result.msg}`)
-        const detailedError = new Error(result.msg || '代码修改失败')
-        ;(detailedError as any).details = result.details || result.error
-        ;(detailedError as any).statusCode = 500
-        throw detailedError
-      }
+      console.log(`📋 修改任务已提交: ${taskId}`)
+      setCurrentTaskId(taskId)
+      setAsyncTaskId(taskId)
 
-      const { code: modifiedCode, codeLength } = result.data
-      console.log(`✅ 代码修改成功，长度: ${codeLength}字符`)
+      // 开始轮询检查任务状态
+      pollTaskStatus(taskId)
 
-      // Update the project with modified code
-      setGeneratedProject(prev => {
-        if (!prev) return null
-        const updatedFiles = {
-          ...prev.files,
-          [selectedFile]: modifiedCode
-        }
-
-        // 保存修改后的文件到数据库
-        if (currentConversationId) {
-          saveFiles(updatedFiles)
-        }
-
-        return {
-          ...prev,
-          files: updatedFiles
-        }
-      })
-
-      // Reset lastPreviewCode to trigger auto-refresh if live preview is enabled
-      // The useEffect hook will detect the change and auto-refresh
-      if (isLivePreviewEnabled && previewUrl) {
-        setLastPreviewCode('') // Reset to trigger refresh
-      }
-
-      // Update the last AI message with success status
-      const successMessage = language === 'en'
-        ? `✅ Code has been modified successfully${isLivePreviewEnabled && previewUrl ? ' • Preview will refresh automatically' : ''}`
-        : `✅ 代码已根据要求修改完成${isLivePreviewEnabled && previewUrl ? ' • 预览将自动刷新' : ''}`
-
-      setMessages(prev => {
-        const newMessages = [...prev]
-        // Find the last AI message and update it
-        for (let i = newMessages.length - 1; i >= 0; i--) {
-          if (newMessages[i].role === 'assistant') {
-            newMessages[i] = {
-              ...newMessages[i],
-              content: successMessage,
-              timestamp: new Date()
-            }
-            break
-          }
-        }
-        return newMessages
-      })
-
-      // 保存AI消息到数据库
-      if (currentConversationId) {
-        await saveMessage('assistant', successMessage)
-      }
-
-      // Clear modification input and code display
-      setModifyInstruction('')
-      setModifyingCode('')
-
-      console.log('🎉 修改完成！')
+      console.log('🎉 修改请求已提交，等待处理完成...')
     } catch (error: any) {
       console.error('Error modifying code:', error)
 
@@ -1692,19 +1314,33 @@ function GeneratePageContent() {
   }
 
   const handlePreview = async () => {
+    console.log('🎯 handlePreview called')
+    console.log('📊 Current state:', {
+      generatedProject: !!generatedProject,
+      selectedFile,
+      previewUrl: !!previewUrl,
+      isPreviewLoading
+    })
+
     if (!generatedProject) {
       setPreviewError('No generated project available')
+      console.log('❌ No generated project')
       return
     }
 
     const currentCode = generatedProject.files[selectedFile] || ''
     if (!currentCode || currentCode.trim().length === 0) {
       setPreviewError('No code available to preview')
+      console.log('❌ No code available for selected file:', selectedFile)
       return
     }
 
+    console.log('✅ Starting preview for file:', selectedFile, 'code length:', currentCode.length)
+
     setIsPreviewLoading(true)
     setPreviewError(null)
+
+    console.log('开始加载预览...')
 
     try {
       // Clear previous preview URL if exists
@@ -1713,6 +1349,7 @@ function GeneratePageContent() {
         setPreviewUrl('')
       }
 
+      console.log('调用预览API... (这可能需要几秒钟，因为需要编译React代码)')
       const response = await fetch('/api/preview-code', {
         method: 'POST',
         headers: {
@@ -1725,6 +1362,8 @@ function GeneratePageContent() {
         }),
       })
 
+      console.log('预览API响应状态:', response.status)
+
       if (response.ok) {
         const previewHtml = await response.text()
         console.log('Preview HTML generated, length:', previewHtml.length)
@@ -1734,7 +1373,8 @@ function GeneratePageContent() {
         const blob = new Blob([previewHtml], { type: 'text/html' })
         const url = URL.createObjectURL(blob)
         setPreviewUrl(url)
-        console.log('Preview URL set:', url)
+        console.log('✅ Preview URL set successfully:', url)
+        console.log('📊 Preview HTML blob size:', blob.size, 'bytes')
 
         // Update lastPreviewCode immediately to prevent auto-refresh loop
         setLastPreviewCode(currentCode)
@@ -1973,12 +1613,7 @@ function GeneratePageContent() {
                                 <div className="space-y-2">
                                   <div className="flex items-center justify-between">
                                     <h4 className="text-sm font-medium">
-                                      {generationMode === 'async'
-                                        ? (language === 'en' ? 'AI is generating in background...' : 'AI正在后台生成...')
-                                        : totalSegments > 0
-                                        ? `Generating segment ${currentSegment}/${totalSegments}...`
-                                        : "Generating your app..."
-                                      }
+                                      {language === 'en' ? 'AI is generating in background...' : 'AI正在后台生成...'}
                                     </h4>
                                     <div className="flex items-center gap-1">
                                       <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
@@ -1989,120 +1624,23 @@ function GeneratePageContent() {
 
                                   <div className="flex items-center justify-between">
                                     <div className="text-xs text-muted-foreground">
-                                      {generationMode === 'async'
-                                        ? (language === 'en' ? 'Background generation in progress...' : '后台生成进行中...')
-                                        : 'This may take 30-60 seconds. Please wait...'
-                                      }
+                                      {language === 'en' ? 'AI is generating your code...' : 'AI正在生成您的代码...'}
                                     </div>
-                                    {generationMode === 'async' ? (
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={cancelAsyncGeneration}
-                                        className="text-xs h-6 px-2"
-                                      >
-                                        {language === 'en' ? 'Cancel' : '取消'}
-                                      </Button>
-                                    ) : (
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => {
-                                          if (abortController) {
-                                            abortController.abort()
-                                            setAbortController(null)
-                                            setIsGenerating(false)
-                                          }
-                                        }}
-                                        className="text-xs h-6 px-2"
-                                      >
-                                        Cancel
-                                      </Button>
-                                    )}
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={cancelAsyncGeneration}
+                                      className="text-xs h-6 px-2"
+                                    >
+                                      {language === 'en' ? 'Cancel' : '取消'}
+                                    </Button>
                                   </div>
 
-                                  <div className="space-y-2">
-                                    {generationMode === 'async' ? (
-                                      <div className="flex items-center gap-2">
-                                        <div className="h-2 flex-1 rounded-full bg-secondary-foreground/20 overflow-hidden">
-                                          <div className="h-full bg-accent rounded-full transition-all duration-500" style={{ width: `${asyncProgress || 10}%` }} />
-                                        </div>
-                                        <span className="text-xs font-medium text-accent">{asyncProgress || 10}%</span>
-                                      </div>
-                                    ) : (
-                                      <div className="flex items-center gap-2">
-                                        <div className="h-2 flex-1 rounded-full bg-secondary-foreground/20 overflow-hidden">
-                                          <div className="h-full bg-accent rounded-full animate-pulse" style={{ width: '65%' }} />
-                                        </div>
-                                        <span className="text-xs font-medium text-accent">65%</span>
-                                      </div>
-                                    )}
-
-                                    {generationMode === 'async' ? (
-                                      <div className="grid grid-cols-4 gap-2 text-center">
-                                        <div className="space-y-1">
-                                          <div className="w-full bg-accent/20 rounded-full h-0.5">
-                                            <div className={`bg-accent h-0.5 rounded-full transition-all duration-500 ${asyncProgress >= 25 ? 'w-full' : asyncProgress >= 10 ? 'w-1/2' : 'w-0'}`}></div>
-                                          </div>
-                                          <p className="text-xs text-muted-foreground">
-                                            {language === 'en' ? 'Analyzing' : '分析中'}
-                                          </p>
-                                        </div>
-                                        <div className="space-y-1">
-                                          <div className="w-full bg-accent/20 rounded-full h-0.5">
-                                            <div className={`bg-accent h-0.5 rounded-full transition-all duration-500 ${asyncProgress >= 50 ? 'w-full' : asyncProgress >= 25 ? 'w-3/4' : 'w-0'}`}></div>
-                                          </div>
-                                          <p className="text-xs text-muted-foreground">
-                                            {language === 'en' ? 'Generating' : '生成中'}
-                                          </p>
-                                        </div>
-                                        <div className="space-y-1">
-                                          <div className="w-full bg-accent/20 rounded-full h-0.5">
-                                            <div className={`bg-accent h-0.5 rounded-full transition-all duration-500 ${asyncProgress >= 75 ? 'w-full' : asyncProgress >= 50 ? 'w-1/2' : 'w-0'}`}></div>
-                                          </div>
-                                          <p className="text-xs text-muted-foreground">
-                                            {language === 'en' ? 'Optimizing' : '优化中'}
-                                          </p>
-                                        </div>
-                                        <div className="space-y-1">
-                                          <div className="w-full bg-accent/20 rounded-full h-0.5">
-                                            <div className={`bg-accent h-0.5 rounded-full transition-all duration-500 ${asyncProgress >= 100 ? 'w-full' : asyncProgress >= 75 ? 'w-3/4' : 'w-0'}`}></div>
-                                          </div>
-                                          <p className="text-xs text-muted-foreground">
-                                            {language === 'en' ? 'Finalizing' : '完成中'}
-                                          </p>
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div className="grid grid-cols-3 gap-2 text-center">
-                                        <div className="space-y-1">
-                                          <div className="w-full bg-accent/20 rounded-full h-0.5">
-                                            <div className="bg-accent h-0.5 rounded-full w-full"></div>
-                                          </div>
-                                          <p className="text-xs text-muted-foreground">Analyzing</p>
-                                        </div>
-                                        <div className="space-y-1">
-                                          <div className="w-full bg-accent/20 rounded-full h-0.5">
-                                            <div className="bg-accent h-0.5 rounded-full w-3/4"></div>
-                                          </div>
-                                          <p className="text-xs text-muted-foreground">Generating</p>
-                                        </div>
-                                        <div className="space-y-1">
-                                          <div className="w-full bg-accent/20 rounded-full h-0.5">
-                                            <div className="bg-accent h-0.5 rounded-full w-1/2"></div>
-                                          </div>
-                                          <p className="text-xs text-muted-foreground">Optimizing</p>
-                                        </div>
-                                      </div>
-                                    )}
-
-                                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                      <Sparkles className="w-3 h-3 animate-spin" />
+                                  <div className="flex items-center justify-center py-8">
+                                    <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                                      <Sparkles className="w-5 h-5 animate-spin text-accent" />
                                       <span>
-                                        {generationMode === 'async'
-                                          ? (language === 'en' ? 'AI working in background...' : 'AI正在后台工作...')
-                                          : 'Creating components and styling...'
-                                        }
+                                        {language === 'en' ? 'Please wait while AI generates your code...' : '请等待AI生成您的代码...'}
                                       </span>
                                     </div>
                                   </div>
@@ -2238,41 +1776,7 @@ function GeneratePageContent() {
 
             {/* Output Section - 只保留这一个 */}
             <div className="space-y-4 lg:col-span-2">
-              {isStreaming && streamingCode ? (
-                <>
-                  {/* Streaming Code Display */}
-                  <div className="rounded-xl border border-border bg-card overflow-hidden">
-                    <div className="bg-secondary/50 px-4 py-3 border-b border-border flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                        <h2 className="text-lg font-semibold">
-                          {language === "en" ? "Generating Code..." : "正在生成代码..."}
-                        </h2>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          abortController?.abort()
-                          setIsStreaming(false)
-                          setStreamingCode('')
-                        }}
-                        className="text-xs"
-                      >
-                        {language === "en" ? "Cancel" : "取消"}
-                      </Button>
-                    </div>
-                    <div className="overflow-auto max-h-[76vh] bg-[#1e1e1e]">
-                      <pre className="p-6 text-sm">
-                        <code className="text-green-400 font-mono">
-                          {streamingCode}
-                          <span className="animate-pulse text-green-500">▊</span>
-                        </code>
-                      </pre>
-                    </div>
-                  </div>
-                </>
-              ) : isGenerating ? (
+              {isGenerating ? (
                 <>
                   {/* AI Code Generation Display */}
                   <div className="rounded-xl border border-border bg-card overflow-hidden">
@@ -2288,7 +1792,7 @@ function GeneratePageContent() {
                               🎨 {language === "en" ? "AI is crafting your code..." : "AI正在为您精心制作代码..."}
                             </h2>
                             <p className="text-sm text-muted-foreground">
-                              {generationProgress?.message || (language === "en" ? "Creating a beautiful, functional component..." : "正在创建一个美观、实用的组件...")}
+                              {language === "en" ? "Creating a beautiful, functional component..." : "正在创建一个美观、实用的组件..."}
                             </p>
                           </div>
                         </div>
@@ -2301,7 +1805,6 @@ function GeneratePageContent() {
                             } else {
                               // 设置状态并取消
                               setIsGenerating(false)
-                              setGenerationProgress(null)
                               setError(language === "en" ? "Generation cancelled" : "生成已取消")
                               // 创建新的abortController并立即取消
                               const controller = new AbortController()
@@ -2317,23 +1820,6 @@ function GeneratePageContent() {
                         </Button>
                       </div>
 
-                      {/* Progress Bar */}
-                      <div className="mt-4">
-                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 overflow-hidden">
-                          <div
-                            className="bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 h-2.5 rounded-full animate-pulse transition-all duration-1000 ease-out"
-                            style={{width: generationProgress?.elapsed ? `${Math.min(85, (generationProgress.elapsed / 45) * 100)}%` : '25%'}}
-                          ></div>
-                        </div>
-                        <div className="flex justify-between items-center mt-3">
-                          <span className="text-xs text-muted-foreground">
-                            {language === "en" ? "Building your perfect component..." : "正在构建您的完美组件..."}
-                          </span>
-                          <span className="text-xs text-muted-foreground font-medium">
-                            {generationProgress?.elapsed ? `${generationProgress.elapsed}s` : '0s'}
-                          </span>
-                        </div>
-                      </div>
                     </div>
 
                     {/* Code Preview Area */}
@@ -2396,39 +1882,6 @@ function GeneratePageContent() {
                 </>
               ) : generatedProject ? (
                 <>
-                  {/* Warning Banner */}
-                  {generationWarning && (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                      <div className="flex items-start gap-3">
-                        <div className="flex-shrink-0">
-                          <svg className="w-5 h-5 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                          </svg>
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="text-sm font-medium text-amber-800">
-                            {language === "en" ? "Code Generation Warning" : "代码生成警告"}
-                          </h3>
-                          <p className="text-sm text-amber-700 mt-1">
-                            {generationWarning}
-                          </p>
-                          <p className="text-xs text-amber-600 mt-2">
-                            {language === "en"
-                              ? "Tip: Try simplifying your request or regenerate with more specific requirements."
-                              : "提示：尝试简化您的需求描述，或使用更具体的描述重新生成。"}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => setGenerationWarning("")}
-                          className="flex-shrink-0 text-amber-400 hover:text-amber-600"
-                        >
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                  )}
 
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -2457,7 +1910,10 @@ function GeneratePageContent() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={handlePreview}
+                          onClick={() => {
+                            console.log('🔘 Preview button clicked')
+                            handlePreview()
+                          }}
                           disabled={isPreviewLoading || !generatedProject || !generatedProject.files[selectedFile]}
                           className="gap-2 bg-green-600 hover:bg-green-700 text-white border-green-600 disabled:opacity-50"
                         >
@@ -2902,7 +2358,13 @@ function GeneratePageContent() {
                               <div className="flex flex-col items-center gap-3">
                                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
                                 <p className="text-sm text-gray-600">
-                                  {language === "en" ? "Loading preview..." : "加载预览中..."}
+                                  {language === "en" ? "Loading preview... (This may take a few seconds)" : "加载预览中... (可能需要几秒钟)"}
+                                </p>
+                                <p className="text-xs text-gray-500 text-center max-w-xs">
+                                  {language === "en"
+                                    ? "Compiling React code and loading libraries..."
+                                    : "正在编译React代码并加载相关库..."
+                                  }
                                 </p>
                               </div>
                             </div>
@@ -2933,12 +2395,7 @@ function GeneratePageContent() {
                         <div className="overflow-auto">
                           <pre className="p-6 text-sm">
                             <code className="text-foreground">
-                              {isStreaming && streamingCode ? (
-                                <>
-                                  {streamingCode}
-                                  <span className="animate-pulse">▊</span>
-                                </>
-                              ) : isModifying && modifyingCode ? (
+                              {isModifying && modifyingCode ? (
                                 <>
                                   {modifyingCode}
                                   <span className="animate-pulse">▊</span>
@@ -2973,13 +2430,6 @@ function GeneratePageContent() {
   )
 
 
-  // 停止SSE监听
-  const stopSSEListening = () => {
-    if (sseRef.current) {
-      sseRef.current.close()
-      sseRef.current = null
-    }
-  }
 
 
   // 删除重复的handleAsyncTaskCompleted函数定义（已在前面定义）
@@ -3011,382 +2461,11 @@ function GeneratePageContent() {
     return complexity
   }
 
-  // 智能生成处理
-  const startSmartGeneration = async () => {
-    if (!prompt.trim()) return
 
-    // 重置状态
-    setIsGenerating(true)
-    setIsStreaming(true)
-    setStreamingCode('')
-    setGeneratedProject(null)
-    setGenerationMode('streaming')
-    setCurrentTaskId(null)
-    setAsyncTaskId(null)
-    setAsyncProgress(0)
-    setError(null)
 
-    // 复杂度评估
-    const complexity = assessPromptComplexity(prompt.trim())
-    console.log(`📊 提示复杂度评估: ${complexity}`)
 
-    // 如果复杂度很高，直接使用异步模式
-    if (complexity > 1200) {
-      console.log('🚨 复杂度过高，直接使用异步模式')
-      setGenerationMode('async')
-      setIsStreaming(false)
-      await startAsyncGeneration()
-      return
-    }
 
-    // 否则使用智能流式模式（可能会自动切换）
-    console.log('🎯 使用智能流式模式')
-    await startSmartStreaming()
-  }
 
-  // 直接异步生成（供复杂度评估调用）
-  const startAsyncGeneration = async (promptText?: string, convId?: string) => {
-    try {
-      console.log('🚀 启动异步生成模式')
-
-      // 获取当前输入的prompt和conversationId，支持传入参数
-      const currentPrompt = promptText || prompt.trim()
-      const currentConversationId = convId || currentConversationId || conversationIdToUse
-
-      const response = await fetch('/api/generate-async', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authSession?.accessToken || ''}`,
-        },
-        body: JSON.stringify({
-          prompt: currentPrompt,
-          model: selectedModel,
-          conversationId: currentConversationId
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-
-      const result = await response.json()
-      const taskId = result.taskId
-
-      console.log(`📋 异步任务已提交: ${taskId}`)
-      setCurrentTaskId(taskId)
-      setAsyncTaskId(taskId)
-
-      // 建立SSE连接监听任务状态
-      startSSEListening(taskId)
-
-    } catch (error) {
-      console.error('启动异步生成失败:', error)
-      setError('启动异步生成失败，请重试')
-      setIsGenerating(false)
-      setGenerationMode('streaming')
-    }
-  }
-
-
-
-  // 智能流式生成
-  const startSmartStreaming = async () => {
-    console.log('🎯 启动智能流式生成')
-
-    try {
-      const response = await fetch('/api/generate-stream', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authSession?.accessToken || ''}`,
-        },
-        body: JSON.stringify({
-          prompt: prompt.trim(),
-          model: selectedModel,
-          conversationId: currentConversationId
-        }),
-        signal: abortController?.signal,
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || `HTTP ${response.status}`)
-      }
-
-      await processSmartStreaming(response)
-
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.log('用户取消生成')
-        return
-      }
-
-      console.error('智能流式生成失败:', error)
-
-      // 如果是网络错误或超时，自动切换到异步模式
-      if (error.message.includes('fetch') || error.message.includes('network') || error.message.includes('timeout')) {
-        console.log('🔄 检测到网络问题，自动切换到异步模式')
-        setGenerationMode('async')
-        setIsStreaming(false)
-        await startAsyncGeneration()
-      } else {
-        setError(error.message || '生成失败，请重试')
-        setIsGenerating(false)
-        setIsStreaming(false)
-      }
-    }
-  }
-
-  // 处理智能流式响应
-  const processSmartStreaming = async (response: Response) => {
-    const reader = response.body?.getReader()
-    const decoder = new TextDecoder()
-    let streamingCodeBuffer = ''
-    let lastDataTime = Date.now()
-    let connectionCheckInterval: NodeJS.Timeout | null = null
-
-    if (!reader) {
-      throw new Error('No response body reader available')
-    }
-
-    // 连接检测定时器
-    connectionCheckInterval = setInterval(() => {
-      const timeSinceLastData = Date.now() - lastDataTime
-      if (timeSinceLastData > 30000) {
-        console.warn(`⚠️ 流式连接检测: ${Math.round(timeSinceLastData/1000)}秒无数据，可能需要切换模式`)
-
-        if (streamingCodeBuffer.length > 50) {
-          // 有足够内容，切换到异步模式继续
-          console.log('🔄 自动切换到异步模式继续生成')
-          setGenerationMode('async')
-          setIsStreaming(false)
-          startAsyncGeneration()
-          if (connectionCheckInterval) {
-            if (connectionCheckInterval) {
-        clearInterval(connectionCheckInterval)
-      }
-          }
-        }
-      }
-    }, 5000)
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-
-        if (done) {
-          break
-        }
-
-        const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split('\n')
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6)
-
-            if (data === '[DONE]') {
-              break
-            }
-
-            try {
-              const parsedData = JSON.parse(data)
-
-              if (parsedData.type === 'chars') {
-                streamingCodeBuffer += parsedData.chars
-                setStreamingCode(streamingCodeBuffer)
-                lastDataTime = Date.now()
-
-                // 自动滚动
-                setTimeout(() => {
-                  const codeContainer = document.querySelector('.overflow-auto')
-                  if (codeContainer) {
-                    codeContainer.scrollTop = codeContainer.scrollHeight
-                  }
-                }, 0)
-
-              } else if (parsedData.type === 'segment_start') {
-                console.log(`📝 开始生成第 ${parsedData.segment}/${parsedData.total} 部分`)
-                setCurrentSegment(parsedData.segment)
-                setTotalSegments(parsedData.total)
-                lastDataTime = Date.now()
-
-              } else if (parsedData.type === 'segment_complete') {
-                console.log(`✅ 完成第 ${parsedData.segment}/${parsedData.total} 部分`)
-                setCurrentSegment(parsedData.segment)
-                lastDataTime = Date.now()
-
-              } else if (parsedData.type === 'heartbeat') {
-                lastDataTime = Date.now()
-                console.log('❤️ 收到心跳包，流式连接正常')
-
-              } else if (parsedData.type === 'mode_switch') {
-                console.log(`🔄 后端要求切换到 ${parsedData.mode} 模式: ${parsedData.reason}`)
-                setGenerationMode(parsedData.mode)
-
-                if (parsedData.mode === 'async') {
-                  setIsStreaming(false)
-
-                  if (parsedData.asyncTaskId) {
-                    setAsyncTaskId(parsedData.asyncTaskId)
-                  }
-                }
-                if (connectionCheckInterval) {
-                  clearInterval(connectionCheckInterval)
-                }
-                return // 退出流式处理
-
-              } else if (parsedData.type === 'complete') {
-                const project = parsedData.project
-                setGeneratedProject(project)
-                setSelectedFile('src/App.tsx')
-                setIsGenerating(false)
-                setIsStreaming(false)
-
-
-                if (connectionCheckInterval) {
-                  clearInterval(connectionCheckInterval)
-                }
-                return
-              }
-
-            } catch (parseError) {
-              console.warn('解析流式数据失败:', parseError)
-            }
-          }
-        }
-      }
-
-    } finally {
-      if (connectionCheckInterval) {
-        clearInterval(connectionCheckInterval)
-      }
-    }
-  }
-
-
-  // 同步生成代码，直接等待AI生成完整代码后再显示
-  async function startDirectGeneration(prompt: string, conversationId: string) {
-    console.log('🎯 启动AI代码生成，等待完整生成...')
-
-    try {
-      // 设置生成进度状态
-      setGenerationProgress({
-        message: 'AI正在生成高质量完整代码，请稍候...',
-        elapsed: 0
-      })
-
-      // 调用同步API，等待AI生成完成
-      console.log('🚀 调用AI代码生成API...')
-      const response = await fetch('/api/generate-code-sync', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authSession?.accessToken}`,
-        },
-        body: JSON.stringify({ prompt }),
-        signal: abortController?.signal
-      })
-
-      console.log(`📤 API响应状态: ${response.status}`)
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        console.log(`❌ API调用失败响应: ${errorText}`)
-        throw new Error(`API调用失败: ${response.status}`)
-      }
-
-      const result = await response.json()
-      console.log(`📋 API响应: ${JSON.stringify(result)}`)
-
-      if (result.code !== 0) {
-        console.log(`❌ 业务失败: ${result.msg}`)
-        throw new Error(result.error || result.msg || '代码生成失败')
-      }
-
-      const { code: generatedCode, codeLength } = result.data
-      console.log(`✅ 代码生成完成，长度: ${codeLength}字符`)
-
-      // 设置最终结果状态
-      setGeneratedProject({
-        files: {
-          'src/App.tsx': generatedCode
-        },
-        projectName: 'GeneratedApp'
-      })
-      setSelectedFile('src/App.tsx')
-      setIsGenerating(false)
-      setIsStreaming(false)
-      setAbortController(null)
-      setGenerationProgress(null)
-
-      // 添加成功消息到对话
-      const aiMessage: Message = {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content: '✅ 代码生成完成！',
-        timestamp: new Date()
-      }
-      setMessages(prev => [...prev, aiMessage])
-
-      // 保存到数据库
-      if (conversationId) {
-        await saveMessageToConversation(conversationId, 'assistant', '代码生成完成！')
-      }
-
-      console.log('🎉 生成完成！')
-
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.log('用户取消生成')
-        setGenerationProgress(null)
-        return
-      }
-
-      console.error('生成失败:', error)
-
-      // 检查是否是同步超时，如果是则自动切换到异步模式
-      if (error.message?.includes('SYNC_GENERATION_TIMEOUT')) {
-        console.log('⏰ 检测到同步生成超时，自动切换到异步模式...')
-
-        setError(language === 'en' ? 'Generation taking longer than expected. Switching to async mode...' : '生成时间较长，正在切换到异步模式...')
-        setGenerationProgress(null)
-
-        // 延迟一下再启动异步模式，给用户看到切换提示
-        setTimeout(async () => {
-          try {
-            await startAsyncGeneration()
-          } catch (asyncError) {
-            console.error('异步模式启动失败:', asyncError)
-            setError(language === 'en' ? 'Both sync and async generation failed. Please try again.' : '同步和异步生成都失败了，请重试。')
-            setIsGenerating(false)
-          }
-        }, 2000)
-
-        return
-      }
-
-      setError(error.message || '生成失败，请重试')
-      setIsGenerating(false)
-      setIsStreaming(false)
-      setAbortController(null)
-      setGenerationProgress(null)
-
-      // 添加错误消息到对话
-      const errorAiMessage: Message = {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content: `❌ 生成失败: ${error.message}`,
-        timestamp: new Date()
-      }
-      setMessages(prev => [...prev, errorAiMessage])
-
-      if (conversationId) {
-        await saveMessageToConversation(conversationId, 'assistant', `❌ 生成失败: ${error.message}`)
-      }
-    }
-  }
 
 
 
