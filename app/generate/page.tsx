@@ -221,6 +221,7 @@ function GeneratePageContent() {
   const isManualRefreshRef = useRef<boolean>(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const sseRef = useRef<EventSource | null>(null)
+  const modificationSSERef = useRef<EventSource | null>(null)
 
   // 解析markdown链接的函数
   const renderContentWithLinks = (content: string) => {
