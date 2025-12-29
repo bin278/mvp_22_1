@@ -64,8 +64,8 @@ export const PLAN_FEATURES: Record<PlanType, PlanFeatures> = {
     responseTimeHours: 72,
   },
   pro: {
-    recommendationLimit: 30,
-    recommendationPeriod: "daily",
+    recommendationLimit: 500,
+    recommendationPeriod: "monthly",
     profileDimensions: 15,
     recommendationReasonLevel: "enhanced",
     historyRetentionDays: 90,
@@ -80,7 +80,7 @@ export const PLAN_FEATURES: Record<PlanType, PlanFeatures> = {
   },
   enterprise: {
     recommendationLimit: -1, // 无限
-    recommendationPeriod: "daily",
+    recommendationPeriod: "monthly",
     profileDimensions: 30,
     recommendationReasonLevel: "full",
     historyRetentionDays: 365,

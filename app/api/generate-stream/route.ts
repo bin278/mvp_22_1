@@ -3,6 +3,7 @@ import OpenAI from 'openai'
 import { AVAILABLE_MODELS, canUseModel, type SubscriptionTier } from '@/lib/subscription-tiers'
 import { requireAuth } from '@/lib/auth/auth'
 import { add } from '@/lib/database/cloudbase'
+import { recordRecommendationUsage } from '@/lib/subscription/usage-tracker'
 
 // 生成状态管理接口
 interface GenerationState {
@@ -250,6 +251,20 @@ async function generateSegment(prompt: string, model: string, user: any): Promis
     const content = completion.choices[0]?.message?.content || '';
     console.log(`✅ 段落生成完成，长度: ${content.length}`);
 
+    // 记录代码生成使用（包括修改代码）
+    try {
+      await recordRecommendationUsage(user.id, {
+        model: model,
+        prompt_length: prompt.length,
+        generated_length: content.length,
+        type: 'code_generation'
+      });
+      console.log('✅ 代码生成使用已记录');
+    } catch (error) {
+      console.error('❌ 记录使用失败:', error);
+      // 不影响生成流程，继续返回结果
+    }
+
     return content;
 
   } catch (error) {
@@ -429,6 +444,28 @@ code {
 
     console.log(`✅ 异步后备处理完成，任务ID: ${taskId}`)
 
+    // 记录代码生成使用（包括修改代码）
+    try {
+      // 计算生成的内容长度
+      let generatedLength = 0
+      if (project.files) {
+        Object.values(project.files).forEach((fileContent: any) => {
+          generatedLength += String(fileContent).length
+        })
+      }
+
+      await recordRecommendationUsage(user.id, {
+        model: model,
+        prompt_length: prompt.length,
+        generated_length: generatedLength,
+        type: 'code_generation'
+      })
+      console.log('✅ 异步模式代码生成使用已记录')
+    } catch (usageError) {
+      console.error('❌ 记录使用失败:', usageError)
+      // 不影响生成流程，继续返回结果
+    }
+
     return project
 
   } catch (error) {
@@ -516,12 +553,8 @@ function formatCodeString(code: string): string {
 }
 
 export async function POST(request: NextRequest) {
-  console.log('🚀 Starting streaming code generation request')
-  const startTime = performance.now()
-
   try {
-    // 进行用户认证
-    console.log('🔐 Authenticating user...')
+    // 验证用户认证
     const authResult = await requireAuth(request)
     if (!authResult.success) {
       console.log('❌ Authentication failed:', authResult.error)
@@ -734,6 +767,9 @@ export async function POST(request: NextRequest) {
     })
 
     console.log('🤖 Starting streaming AI generation...')
+
+    // Record start time for performance tracking
+    const startTime = performance.now()
 
     // Create streaming response
     const stream = new ReadableStream({
@@ -1092,6 +1128,28 @@ code {
               console.error('❌ Failed to save AI response to conversation:', saveError)
               // 不影响代码生成，只记录错误
             }
+          }
+
+          // 记录代码生成使用（包括修改代码）
+          try {
+            // 计算生成的内容长度
+            let generatedLength = 0
+            if (parsedResponse.files) {
+              Object.values(parsedResponse.files).forEach((fileContent: any) => {
+                generatedLength += String(fileContent).length
+              })
+            }
+
+            await recordRecommendationUsage(user.id, {
+              model: requestedModel,
+              prompt_length: prompt.length,
+              generated_length: generatedLength,
+              type: 'code_generation'
+            })
+            console.log('✅ 代码生成使用已记录')
+          } catch (usageError) {
+            console.error('❌ 记录使用失败:', usageError)
+            // 不影响生成流程，继续返回结果
           }
 
           // Send final complete response

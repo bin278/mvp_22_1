@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node:*)",
+      "Bash(cat:*)",
+      "Bash(dos2unix:*)",
+      "Bash(curl:*)",
+      "Bash(npx tsc:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(find:*)",
+      "Bash(wc:*)"
+    ]
+  }
+}

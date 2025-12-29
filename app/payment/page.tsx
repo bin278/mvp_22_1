@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Badge } from "@/components/ui/badge"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
-import { Check, Crown, Zap, Building2, CreditCard, ArrowLeft, Loader2, Settings, Info, Sparkles, ChevronDown } from "lucide-react"
+import { Check, Crown, Zap, Building2, CreditCard, ArrowLeft, Loader2, Settings, Info, Sparkles, ChevronDown, Languages, Battery, TrendingUp } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { useLanguage } from "@/components/language-provider"
 import { useTranslations } from "@/lib/i18n"
@@ -46,7 +46,7 @@ export default function PricingPage() {
   const { user, isAuthenticated } = useAuth()
   const router = useRouter()
   const { toast } = useToast()
-  const { language } = useLanguage()
+  const { language, setLanguage } = useLanguage()
   const t = useTranslations(language)
   
   // 中国版默认支付方式
@@ -54,7 +54,9 @@ export default function PricingPage() {
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("yearly")
   const [processingPlan, setProcessingPlan] = useState<Tier | null>(null)
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null)
-  
+
+  // 加油包状态
+  const [processingCreditPackage, setProcessingCreditPackage] = useState<string | null>(null)
 
   // CN 支付状态
   const [cnPayment, setCnPayment] = useState<{
@@ -67,6 +69,8 @@ export default function PricingPage() {
     currency: string
     planName: string
     billingCycle: BillingCycle
+    isCreditPackage?: boolean
+    creditPackageType?: string
   } | null>(null)
   const [isCNDialogOpen, setIsCNDialogOpen] = useState(false)
 
@@ -195,7 +199,23 @@ export default function PricingPage() {
       const data = await response.json()
 
       if (!response.ok) {
-        throw new Error(data.error || "支付创建失败")
+        // 特殊处理重复支付请求
+        if (data.code === "DUPLICATE_PAYMENT_REQUEST") {
+          const waitTime = data.waitTime || 60
+          const message = language === "zh"
+            ? `${data.error || "您有一个待处理的支付请求，请稍后再试"}\n请等待 ${waitTime} 秒后重试`
+            : `${data.error || "You have a pending payment request, please try again later"}\nPlease wait ${waitTime} seconds before retry`
+
+          toast({
+            title: language === "zh" ? "支付请求重复" : "Duplicate Payment Request",
+            description: message,
+            variant: "destructive",
+          })
+          return
+        }
+
+        // 其他错误
+        throw new Error(data.error || (language === "zh" ? "支付创建失败" : "Failed to create payment"))
       }
 
       // 处理支付响应
@@ -245,6 +265,103 @@ export default function PricingPage() {
       })
     } finally {
       setProcessingPlan(null)
+    }
+  }
+
+  // 购买加油包
+  const handleBuyCreditPackage = async (packageType: "basic" | "standard" | "premium") => {
+    if (!isAuthenticated) {
+      router.push("/login")
+      return
+    }
+
+    setProcessingCreditPackage(packageType)
+
+    try {
+      const apiEndpoint = "/api/payment/cn/credit-package/create"
+
+      const response = await fetchWithAuth(apiEndpoint, {
+        method: "POST",
+        body: JSON.stringify({
+          packageType,
+          method: selectedPayment,
+          mode: "qrcode",
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        // 特殊处理重复支付请求
+        if (data.code === "DUPLICATE_PAYMENT_REQUEST") {
+          const waitTime = data.waitTime || 60
+          const message = language === "zh"
+            ? `${data.error || "您有一个待处理的支付请求，请稍后再试"}\n请等待 ${waitTime} 秒后重试`
+            : `${data.error || "You have a pending payment request, please try again later"}\nPlease wait ${waitTime} seconds before retry`
+
+          toast({
+            title: language === "zh" ? "支付请求重复" : "Duplicate Payment Request",
+            description: message,
+            variant: "destructive",
+          })
+          return
+        }
+
+        // 其他错误
+        throw new Error(data.error || (language === "zh" ? "支付创建失败" : "Failed to create payment"))
+      }
+
+      // 处理支付响应
+      setProcessingCreditPackage(null)
+
+      if (data.paymentUrl) {
+        // 电脑网站支付（支付宝）
+        setCnPayment({
+          orderId: data.orderId,
+          paymentUrl: data.paymentUrl,
+          mode: "page",
+          method: selectedPayment as PaymentMethodCN,
+          amount: data.amount,
+          currency: data.currency,
+          planName: data.packageConfig.nameZh,
+          billingCycle: "monthly",
+          isCreditPackage: true,
+          creditPackageType: packageType,
+        })
+        setIsCNDialogOpen(true)
+        toast({
+          title: "支付宝",
+          description: "请在弹出的页面中完成支付",
+        })
+      } else if (data.qrCodeUrl) {
+        // 二维码支付（微信）
+        setCnPayment({
+          orderId: data.orderId,
+          qrCodeUrl: data.qrCodeUrl,
+          mode: "qrcode",
+          method: selectedPayment as PaymentMethodCN,
+          amount: data.amount,
+          currency: data.currency,
+          planName: data.packageConfig.nameZh,
+          billingCycle: "monthly",
+          isCreditPackage: true,
+          creditPackageType: packageType,
+        })
+        setIsCNDialogOpen(true)
+        toast({
+          title: "微信支付",
+          description: "请扫描二维码完成支付",
+        })
+      }
+    } catch (error: any) {
+      console.error("Credit package purchase error:", error)
+      toast({
+        title: language === "zh" ? "购买失败" : "Purchase Failed",
+        description: error.message || (language === "zh" ? "支付创建失败，请重试" : "Failed to create payment"),
+        variant: "destructive",
+      })
+    } finally {
+      setProcessingCreditPackage(null)
     }
   }
 
@@ -349,13 +466,24 @@ export default function PricingPage() {
         <div className="relative z-10 p-4 py-12">
           <div className="max-w-6xl mx-auto">
             {/* Header */}
-            <div className="flex items-center mb-8">
+            <div className="flex items-center justify-between mb-8">
               <Link href="/">
                 <Button variant="ghost" size="sm" className="hover:bg-white/60 backdrop-blur-sm transition-all">
                   <ArrowLeft className="h-4 w-4 mr-2" />
                   {t.pricing.back}
                 </Button>
               </Link>
+
+              {/* Language Switcher */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setLanguage(language === "zh" ? "en" : "zh")}
+                className="hover:bg-white/80 backdrop-blur-sm transition-all border-gray-300"
+              >
+                <Languages className="h-4 w-4 mr-2" />
+                {language === "zh" ? "EN" : "中文"}
+              </Button>
             </div>
 
             {/* Hero Section */}
@@ -613,6 +741,224 @@ export default function PricingPage() {
                 )
               })}
             </div>
+
+            {/* Credit Package Section */}
+            {isCN && (
+              <div className="mt-20">
+                <div className="text-center mb-10">
+                  <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-orange-500/10 to-red-500/10 border border-orange-200/50 backdrop-blur-sm mb-4">
+                    <Battery className="h-4 w-4 text-orange-600" />
+                    <span className="text-sm font-medium bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent">
+                      {language === "zh" ? "加油包" : "Credit Packages"}
+                    </span>
+                  </div>
+                  <h2 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-transparent mb-3">
+                    {language === "zh" ? "需要更多生成次数？" : "Need More Generations?"}
+                  </h2>
+                  <p className="text-gray-600 max-w-2xl mx-auto">
+                    {language === "zh"
+                      ? "购买加油包，获得额外的代码生成次数。次数优先于订阅配额使用，购买后立即生效。"
+                      : "Purchase credit packages for additional code generations. Credits are used before your subscription quota and take effect immediately."}
+                  </p>
+                </div>
+
+                {/* Credit Package Cards */}
+                <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+                  {/* Basic Package */}
+                  <Card className="relative overflow-hidden transition-all duration-500 border-2 shadow-xl hover:shadow-2xl hover:-translate-y-1 bg-gradient-to-br from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 border-blue-200">
+                    <CardHeader className="text-center pb-4">
+                      <div className="flex justify-center mb-4">
+                        <div className="p-3 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg shadow-blue-500/30">
+                          <TrendingUp className="h-6 w-6 text-white" />
+                        </div>
+                      </div>
+                      <CardTitle className="text-xl font-bold">
+                        {language === "zh" ? "基础加油包" : "Basic Package"}
+                      </CardTitle>
+                      <div className="mt-4 flex items-baseline justify-center gap-1">
+                        <span className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+                          ¥9.9
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-600 mt-2">
+                        {language === "zh" ? "100 次生成" : "100 Generations"}
+                      </p>
+                    </CardHeader>
+                    <CardContent className="pb-6">
+                      <div className="h-px bg-gradient-to-r from-transparent via-blue-200 to-transparent mb-4" />
+                      <ul className="space-y-3">
+                        <li className="flex items-center gap-2 text-sm text-gray-700">
+                          <Check className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                          {language === "zh" ? "100 次代码生成" : "100 code generations"}
+                        </li>
+                        <li className="flex items-center gap-2 text-sm text-gray-700">
+                          <Check className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                          {language === "zh" ? "30 天有效期" : "30 days validity"}
+                        </li>
+                        <li className="flex items-center gap-2 text-sm text-gray-700">
+                          <Check className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                          {language === "zh" ? "优先于订阅配额使用" : "Used before subscription quota"}
+                        </li>
+                        <li className="flex items-center gap-2 text-sm text-gray-700">
+                          <Check className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                          {language === "zh" ? "购买后立即生效" : "Takes effect immediately"}
+                        </li>
+                      </ul>
+                    </CardContent>
+                    <CardFooter className="pb-6">
+                      <Button
+                        onClick={() => handleBuyCreditPackage("basic")}
+                        disabled={processingCreditPackage === "basic"}
+                        className="w-full h-12 bg-gradient-to-r from-blue-600 to-indigo-600 hover:shadow-lg hover:shadow-blue-500/30 text-white font-semibold rounded-xl transition-all duration-300"
+                      >
+                        {processingCreditPackage === "basic" ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            {language === "zh" ? "处理中..." : "Processing..."}
+                          </>
+                        ) : (
+                          <>
+                            <CreditCard className="mr-2 h-4 w-4" />
+                            {language === "zh" ? "立即购买" : "Buy Now"}
+                          </>
+                        )}
+                      </Button>
+                    </CardFooter>
+                  </Card>
+
+                  {/* Standard Package */}
+                  <Card className="relative overflow-hidden transition-all duration-500 border-2 shadow-xl hover:shadow-2xl hover:-translate-y-1 bg-gradient-to-br from-purple-50 to-pink-50 hover:from-purple-100 hover:to-pink-100 border-purple-200">
+                    <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-purple-600 to-pink-600" />
+                    <CardHeader className="text-center pb-4">
+                      <div className="flex justify-center mb-4">
+                        <div className="p-3 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-600 shadow-lg shadow-purple-500/30">
+                          <TrendingUp className="h-6 w-6 text-white" />
+                        </div>
+                      </div>
+                      <CardTitle className="text-xl font-bold">
+                        {language === "zh" ? "标准加油包" : "Standard Package"}
+                      </CardTitle>
+                      <div className="mt-4 flex items-baseline justify-center gap-1">
+                        <span className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+                          ¥24.9
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-600 mt-2">
+                        {language === "zh" ? "300 次生成" : "300 Generations"}
+                      </p>
+                      <Badge className="mt-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white border-0">
+                        {language === "zh" ? "性价比之选" : "Best Value"}
+                      </Badge>
+                    </CardHeader>
+                    <CardContent className="pb-6">
+                      <div className="h-px bg-gradient-to-r from-transparent via-purple-200 to-transparent mb-4" />
+                      <ul className="space-y-3">
+                        <li className="flex items-center gap-2 text-sm text-gray-700">
+                          <Check className="h-4 w-4 text-purple-600 flex-shrink-0" />
+                          {language === "zh" ? "300 次代码生成" : "300 code generations"}
+                        </li>
+                        <li className="flex items-center gap-2 text-sm text-gray-700">
+                          <Check className="h-4 w-4 text-purple-600 flex-shrink-0" />
+                          {language === "zh" ? "30 天有效期" : "30 days validity"}
+                        </li>
+                        <li className="flex items-center gap-2 text-sm text-gray-700">
+                          <Check className="h-4 w-4 text-purple-600 flex-shrink-0" />
+                          {language === "zh" ? "优先于订阅配额使用" : "Used before subscription quota"}
+                        </li>
+                        <li className="flex items-center gap-2 text-sm text-gray-700">
+                          <Check className="h-4 w-4 text-purple-600 flex-shrink-0" />
+                          {language === "zh" ? "节省 17%" : "Save 17%"}
+                        </li>
+                      </ul>
+                    </CardContent>
+                    <CardFooter className="pb-6">
+                      <Button
+                        onClick={() => handleBuyCreditPackage("standard")}
+                        disabled={processingCreditPackage === "standard"}
+                        className="w-full h-12 bg-gradient-to-r from-purple-600 to-pink-600 hover:shadow-lg hover:shadow-purple-500/30 text-white font-semibold rounded-xl transition-all duration-300"
+                      >
+                        {processingCreditPackage === "standard" ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            {language === "zh" ? "处理中..." : "Processing..."}
+                          </>
+                        ) : (
+                          <>
+                            <CreditCard className="mr-2 h-4 w-4" />
+                            {language === "zh" ? "立即购买" : "Buy Now"}
+                          </>
+                        )}
+                      </Button>
+                    </CardFooter>
+                  </Card>
+
+                  {/* Premium Package */}
+                  <Card className="relative overflow-hidden transition-all duration-500 border-2 shadow-xl hover:shadow-2xl hover:-translate-y-1 bg-gradient-to-br from-amber-50 to-orange-50 hover:from-amber-100 hover:to-orange-100 border-amber-200">
+                    <CardHeader className="text-center pb-4">
+                      <div className="flex justify-center mb-4">
+                        <div className="p-3 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 shadow-lg shadow-amber-500/30">
+                          <TrendingUp className="h-6 w-6 text-white" />
+                        </div>
+                      </div>
+                      <CardTitle className="text-xl font-bold">
+                        {language === "zh" ? "高级加油包" : "Premium Package"}
+                      </CardTitle>
+                      <div className="mt-4 flex items-baseline justify-center gap-1">
+                        <span className="text-4xl font-bold bg-gradient-to-r from-amber-600 to-orange-600 bg-clip-text text-transparent">
+                          ¥79.9
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-600 mt-2">
+                        {language === "zh" ? "1000 次生成" : "1000 Generations"}
+                      </p>
+                      <Badge className="mt-2 bg-gradient-to-r from-amber-600 to-orange-600 text-white border-0">
+                        {language === "zh" ? "超值优惠" : "Super Saver"}
+                      </Badge>
+                    </CardHeader>
+                    <CardContent className="pb-6">
+                      <div className="h-px bg-gradient-to-r from-transparent via-amber-200 to-transparent mb-4" />
+                      <ul className="space-y-3">
+                        <li className="flex items-center gap-2 text-sm text-gray-700">
+                          <Check className="h-4 w-4 text-amber-600 flex-shrink-0" />
+                          {language === "zh" ? "1000 次代码生成" : "1000 code generations"}
+                        </li>
+                        <li className="flex items-center gap-2 text-sm text-gray-700">
+                          <Check className="h-4 w-4 text-amber-600 flex-shrink-0" />
+                          {language === "zh" ? "60 天有效期" : "60 days validity"}
+                        </li>
+                        <li className="flex items-center gap-2 text-sm text-gray-700">
+                          <Check className="h-4 w-4 text-amber-600 flex-shrink-0" />
+                          {language === "zh" ? "优先于订阅配额使用" : "Used before subscription quota"}
+                        </li>
+                        <li className="flex items-center gap-2 text-sm text-gray-700">
+                          <Check className="h-4 w-4 text-amber-600 flex-shrink-0" />
+                          {language === "zh" ? "节省 20%" : "Save 20%"}
+                        </li>
+                      </ul>
+                    </CardContent>
+                    <CardFooter className="pb-6">
+                      <Button
+                        onClick={() => handleBuyCreditPackage("premium")}
+                        disabled={processingCreditPackage === "premium"}
+                        className="w-full h-12 bg-gradient-to-r from-amber-600 to-orange-600 hover:shadow-lg hover:shadow-amber-500/30 text-white font-semibold rounded-xl transition-all duration-300"
+                      >
+                        {processingCreditPackage === "premium" ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            {language === "zh" ? "处理中..." : "Processing..."}
+                          </>
+                        ) : (
+                          <>
+                            <CreditCard className="mr-2 h-4 w-4" />
+                            {language === "zh" ? "立即购买" : "Buy Now"}
+                          </>
+                        )}
+                      </Button>
+                    </CardFooter>
+                  </Card>
+                </div>
+              </div>
+            )}
 
             {/* FAQ Section */}
             <div className="mt-20 max-w-3xl mx-auto">

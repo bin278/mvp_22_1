@@ -1,38 +1,30 @@
-/**
- * CN 支付创建订单 API
- * POST /api/payment/cn/create
- *
- * 使用 CloudBase 存储支付记录（CN 环境）
- */
+// app/api/payment/cn/credit-package/create/route.ts - 创建加油包支付订单
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth/auth";
-import { getCloudBaseDatabase, CloudBaseCollections, getDbCommand } from "@/lib/database/cloudbase-client";
+import { getCloudBaseDatabase, CloudBaseCollections } from "@/lib/database/cloudbase-client";
 import { CloudBaseUserAdapter } from "@/lib/database/adapters/cloudbase-user";
 import { createPaymentAdapterCN } from "@/lib/payment/adapter-cn";
 import {
-  getDaysByBillingCycleCN,
+  getCreditPackageConfigCN,
+  getCreditPackagePriceCN,
   isPaymentTestMode,
   TEST_MODE_AMOUNT,
+  type CreditPackageType,
   type PaymentMethodCN,
   type PaymentModeCN,
-  type BillingCycle,
 } from "@/lib/payment/payment-config-cn";
 import { getBaseUrl } from "@/lib/utils/get-base-url";
+import { getDbCommand } from "@/lib/database/cloudbase-client";
 
 // CloudBase 适配器实例
 const cloudbaseAdapter = new CloudBaseUserAdapter();
 
 // 请求验证 Schema
-const createPaymentSchema = z.object({
+const createCreditPackageSchema = z.object({
+  packageType: z.enum(["basic", "standard", "premium"]),
   method: z.enum(["wechat", "alipay"]),
-  mode: z.enum(["qrcode", "page"]).default("qrcode"), // 支付模式：二维码/电脑网站支付
-  amount: z.number().positive("金额必须为正数"),
-  currency: z.string().default("CNY"),
-  description: z.string().optional(),
-  planType: z.enum(["pro", "enterprise"]).default("pro"),
-  billingCycle: z.enum(["monthly", "yearly"]).default("monthly"),
-  returnUrl: z.string().optional(), // 支付完成后回跳地址
+  mode: z.enum(["qrcode", "page"]).default("qrcode"),
 });
 
 export async function POST(request: NextRequest) {
@@ -50,7 +42,7 @@ export async function POST(request: NextRequest) {
 
     // 解析并验证请求
     const body = await request.json();
-    const validationResult = createPaymentSchema.safeParse(body);
+    const validationResult = createCreditPackageSchema.safeParse(body);
 
     if (!validationResult.success) {
       return NextResponse.json(
@@ -64,17 +56,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { method, mode, amount, currency, description, planType, billingCycle, returnUrl } = validationResult.data;
+    const { packageType, method, mode } = validationResult.data;
     const userId = user.id;
 
-    // 测试模式：所有支付方式使用 0.01 元
-    let finalAmount = amount;
-    if (isPaymentTestMode) {
-      finalAmount = TEST_MODE_AMOUNT;
-      console.log(`🧪 [CN Payment] 测试模式：${method} 支付金额改为 ¥${finalAmount}`);
-    }
+    // 获取加油包配置
+    const packageConfig = getCreditPackageConfigCN(packageType as CreditPackageType);
+    const finalAmount = getCreditPackagePriceCN(packageType as CreditPackageType);
 
-    // 检查重复支付请求（1分钟内）- 使用 CloudBase
+    console.log(`🛒 [Credit Package] 创建加油包订单:`, {
+      userId,
+      packageType,
+      packageId: packageConfig.id,
+      amount: finalAmount,
+      testMode: isPaymentTestMode,
+    });
+
+    // 防重复支付检查（1分钟内）
     const oneMinuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
     const db = getCloudBaseDatabase();
     const cmd = getDbCommand();
@@ -85,7 +82,7 @@ export async function POST(request: NextRequest) {
         .where({
           user_id: userId,
           amount: finalAmount,
-          currency,
+          currency: "CNY",
           payment_method: method,
           created_at: cmd.gte(oneMinuteAgo),
           status: cmd.in(["pending", "completed"]),
@@ -120,34 +117,32 @@ export async function POST(request: NextRequest) {
       // 继续处理，不阻止支付创建
     }
 
-    // 创建支付适配器
-    const adapter = createPaymentAdapterCN(method as PaymentMethodCN);
-
     // 微信支付在PC端只支持Native扫码支付，自动降级为qrcode模式
-    // 支付宝支持 qrcode（当面付扫码）和 page（电脑网站支付跳转）两种模式
-    const actualMode: PaymentModeCN = method === "wechat" ? "qrcode" : mode as PaymentModeCN;
+    const actualMode: PaymentModeCN = method === "wechat" ? "qrcode" : mode;
 
     // 创建支付订单
-    console.log(`[CN Payment] 创建 ${method} 订单 (${actualMode} 模式):`, { userId, amount: finalAmount, planType, billingCycle });
+    const paymentReturnUrl = `${getBaseUrl()}/payment/result`;
 
-    // 计算回跳地址
-    const paymentReturnUrl = returnUrl || `${getBaseUrl()}/payment/result`;
-
-    const orderResult = await adapter.createOrder(finalAmount, userId, method as PaymentMethodCN, {
-      currency,
-      description: description || `${planType === "pro" ? "专业版" : "企业版"}会员 - ${billingCycle === "yearly" ? "年度" : "月度"}`,
-      billingCycle,
-      planType,
-      mode: actualMode,
-      returnUrl: paymentReturnUrl,
-    });
+    const orderResult = await createPaymentAdapterCN(method).createOrder(
+      finalAmount,
+      userId,
+      method,
+      {
+        currency: "CNY",
+        description: `${packageConfig.nameZh} - ${packageConfig.descriptionZh}`,
+        mode: actualMode,
+        returnUrl: paymentReturnUrl,
+      }
+    );
 
     // 记录支付到 CloudBase 数据库
-    const days = getDaysByBillingCycleCN(billingCycle as BillingCycle);
     const metadata = {
-      days,
-      billingCycle,
-      planType,
+      type: "credit_package",
+      packageType,
+      packageId: packageConfig.id,
+      packageName: packageConfig.nameZh,
+      credits: packageConfig.credits,
+      validityDays: packageConfig.validityDays,
       paymentMethod: method,
       paymentMode: actualMode,
     };
@@ -155,7 +150,7 @@ export async function POST(request: NextRequest) {
     const paymentResult = await cloudbaseAdapter.createPayment({
       user_id: userId,
       amount: finalAmount,
-      currency,
+      currency: "CNY",
       status: "pending",
       payment_method: method,
       transaction_id: orderResult.orderId,
@@ -163,19 +158,18 @@ export async function POST(request: NextRequest) {
     });
 
     if (!paymentResult.success) {
-      console.error("[CN Payment] 记录支付失败:", paymentResult.error);
+      console.error("[Credit Package] 记录支付失败:", paymentResult.error);
       return NextResponse.json(
         { success: false, error: "记录支付失败" },
         { status: 500 }
       );
     }
 
-    console.log("✅ [CN Payment] 订单创建成功:", {
+    console.log("✅ [Credit Package] 订单创建成功:", {
       paymentId: paymentResult.id,
       orderId: orderResult.orderId,
-      mode,
-      qrCodeUrl: orderResult.qrCodeUrl,
-      paymentUrl: orderResult.paymentUrl,
+      packageType,
+      credits: packageConfig.credits,
     });
 
     return NextResponse.json({
@@ -186,11 +180,13 @@ export async function POST(request: NextRequest) {
       paymentUrl: orderResult.paymentUrl,
       method,
       amount: finalAmount,
-      currency,
+      currency: "CNY",
+      packageType,
+      packageConfig,
       testMode: isPaymentTestMode && method === "wechat",
     });
   } catch (error: any) {
-    console.error("[CN Payment] 创建订单失败:", error);
+    console.error("[Credit Package] 创建订单失败:", error);
     return NextResponse.json(
       { success: false, error: error.message || "创建支付订单失败" },
       { status: 500 }

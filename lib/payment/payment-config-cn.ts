@@ -7,6 +7,9 @@
  * - Pro: ¥19.9/月, ¥199/年
  * - Enterprise: ¥49.9/月, ¥499/年
  *
+ * 加油包：
+ * - 基础包: ¥9.9 - 100次 (30天有效)
+ *
  * 测试模式：设置环境变量 PAYMENT_TEST_MODE=true 可将所有支付金额改为 0.01 元
  */
 
@@ -15,10 +18,16 @@ export type PaymentMethodCN = "wechat" | "alipay";
 export type PaymentModeCN = "qrcode" | "page"; // 二维码支付 / 电脑网站支付
 export type PlanType = "free" | "pro" | "enterprise";
 
+// 加油包类型
+export type CreditPackageType = "basic" | "standard" | "premium";
+
 /**
  * 是否为支付测试模式
+ * 开发环境自动启用，生产环境需要显式设置 PAYMENT_TEST_MODE=true
  */
-export const isPaymentTestMode = process.env.PAYMENT_TEST_MODE === "true";
+export const isPaymentTestMode =
+  process.env.NODE_ENV === 'development' ||
+  process.env.PAYMENT_TEST_MODE === "true";
 
 /**
  * 测试模式金额（0.01 元）
@@ -40,6 +49,55 @@ const PRICING_DATA_CN = {
     },
   },
 } as const;
+
+/**
+ * 加油包配置表
+ */
+export const CREDIT_PACKAGES_CN: Record<CreditPackageType, {
+  id: string;
+  name: string;
+  nameZh: string;
+  description: string;
+  descriptionZh: string;
+  credits: number;
+  price: number;
+  currency: string;
+  validityDays: number;
+}> = {
+  basic: {
+    id: "credit-basic-100",
+    name: "Basic Credit Package",
+    nameZh: "基础加油包",
+    description: "100 code generations, valid for 30 days",
+    descriptionZh: "100次代码生成，30天有效",
+    credits: 100,
+    price: 9.9,
+    currency: "CNY",
+    validityDays: 30,
+  },
+  standard: {
+    id: "credit-standard-300",
+    name: "Standard Credit Package",
+    nameZh: "标准加油包",
+    description: "300 code generations, valid for 30 days",
+    descriptionZh: "300次代码生成，30天有效",
+    credits: 300,
+    price: 24.9,
+    currency: "CNY",
+    validityDays: 30,
+  },
+  premium: {
+    id: "credit-premium-1000",
+    name: "Premium Credit Package",
+    nameZh: "高级加油包",
+    description: "1000 code generations, valid for 60 days",
+    descriptionZh: "1000次代码生成，60天有效",
+    credits: 1000,
+    price: 79.9,
+    currency: "CNY",
+    validityDays: 60,
+  },
+};
 
 /**
  * 导出定价表供前端显示
@@ -101,6 +159,28 @@ export function getAmountByCurrencyCN(
  */
 export function getDaysByBillingCycleCN(billingCycle: BillingCycle): number {
   return billingCycle === "monthly" ? 30 : 365;
+}
+
+/**
+ * 获取加油包配置
+ * @param packageType 加油包类型
+ * @returns 加油包配置
+ */
+export function getCreditPackageConfigCN(packageType: CreditPackageType = "basic") {
+  return CREDIT_PACKAGES_CN[packageType];
+}
+
+/**
+ * 获取加油包价格
+ * @param packageType 加油包类型
+ * @returns 价格（如果测试模式则返回 0.01）
+ */
+export function getCreditPackagePriceCN(packageType: CreditPackageType = "basic"): number {
+  const packageConfig = CREDIT_PACKAGES_CN[packageType];
+  if (isPaymentTestMode) {
+    return TEST_MODE_AMOUNT;
+  }
+  return packageConfig.price;
 }
 
 /**

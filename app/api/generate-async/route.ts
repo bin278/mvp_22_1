@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth/auth'
 import { add, update, query } from '@/lib/database/cloudbase'
 import OpenAI from 'openai'
+import { recordRecommendationUsage } from '@/lib/subscription/usage-tracker'
 
 // 导入SSE广播函数
 function broadcastTaskUpdate(taskId: string, data: any) {
@@ -296,6 +297,28 @@ async function processAsyncTask(task: GenerationTask, existingContent?: string, 
     task.completedAt = new Date().toISOString()
     task.updatedAt = new Date().toISOString()
     taskQueue.set(task.taskId, task)
+
+    // 记录代码生成使用（包括修改代码）
+    try {
+      // 计算生成的内容长度
+      let generatedLength = 0
+      if (projectResult.files) {
+        Object.values(projectResult.files).forEach((fileContent: any) => {
+          generatedLength += String(fileContent).length
+        })
+      }
+
+      await recordRecommendationUsage(task.userId, {
+        model: task.model,
+        prompt_length: task.prompt.length,
+        generated_length: generatedLength,
+        type: isModification ? 'code_modification' : 'code_generation'
+      })
+      console.log('✅ [异步任务] 代码生成使用已记录')
+    } catch (usageError) {
+      console.error('❌ [异步任务] 记录使用失败:', usageError)
+      // 不影响任务完成，继续返回结果
+    }
 
     // 广播完成状态
     broadcastTaskUpdate(task.taskId, {

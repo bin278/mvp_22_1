@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
-import { User, Mail, Calendar, Sparkles, Github, Unlink, ExternalLink, Loader2, Crown, Zap, Star } from "lucide-react"
+import { User, Mail, Calendar, Sparkles, Github, Unlink, ExternalLink, Loader2, Crown, Zap, Star, Code } from "lucide-react"
 import { SUBSCRIPTION_TIERS, type SubscriptionTier } from "@/lib/subscription-tiers"
 
 export default function ProfilePage() {
@@ -37,6 +37,15 @@ function ProfilePageContent() {
   const [subscriptionStatus, setSubscriptionStatus] = useState<string>('inactive')
   const [subscriptionEndDate, setSubscriptionEndDate] = useState<string | null>(null)
   const [isLoadingSubscription, setIsLoadingSubscription] = useState(true)
+
+  // Code generation usage state
+  const [codeUsage, setCodeUsage] = useState<{
+    current: number
+    limit: number
+    remaining: number
+    isUnlimited: boolean
+  } | null>(null)
+  const [isLoadingUsage, setIsLoadingUsage] = useState(true)
 
   if (!user) return null
 
@@ -81,6 +90,38 @@ function ProfilePageContent() {
     }
 
     loadSubscriptionInfo()
+  }, [session])
+
+  // Load code generation usage
+  useEffect(() => {
+    const loadCodeUsage = async () => {
+      if (!session?.accessToken) return
+
+      try {
+        setIsLoadingUsage(true)
+        const response = await fetch('/api/subscription/check-usage', {
+          headers: {
+            'Authorization': `Bearer ${session.accessToken}`,
+          },
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          console.log('Code usage loaded:', data.usage)
+          setCodeUsage(data.usage)
+        } else {
+          console.error('Failed to load code usage:', response.status)
+          setCodeUsage(null)
+        }
+      } catch (error) {
+        console.error('Error loading code usage:', error)
+        setCodeUsage(null)
+      } finally {
+        setIsLoadingUsage(false)
+      }
+    }
+
+    loadCodeUsage()
   }, [session])
 
   // Check GitHub connection status
@@ -544,31 +585,104 @@ function ProfilePageContent() {
               </CardTitle>
               <CardDescription>
                 {language === "en"
-                  ? "Your CodeGen AI usage this month"
-                  : "本月 CodeGen AI 使用情况"}
+                  ? "Your code generation usage this month"
+                  : "本月代码生成使用情况"}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="text-center p-4 bg-secondary/20 rounded-lg">
-                  <div className="text-2xl font-bold text-accent">24</div>
-                  <div className="text-sm text-muted-foreground">
-                    {language === "en" ? "Components Generated" : "已生成组件"}
-                  </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                {/* Code Generation Usage */}
+                <div className="text-center p-6 bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-950/40 dark:to-blue-900/40 rounded-lg border-2 border-blue-300 dark:border-blue-700 shadow-sm">
+                  {isLoadingUsage ? (
+                    <div className="flex items-center justify-center">
+                      <Loader2 className="h-6 w-6 animate-spin text-blue-600 dark:text-blue-400" />
+                    </div>
+                  ) : codeUsage ? (
+                    <>
+                      <div className="flex items-center justify-center gap-2 mb-3">
+                        <Code className="h-6 w-6 text-blue-700 dark:text-blue-300" />
+                        <div className="text-4xl font-bold text-blue-900 dark:text-blue-100">
+                          {codeUsage.isUnlimited
+                            ? (language === "en" ? "∞" : "无限")
+                            : codeUsage.remaining}
+                        </div>
+                      </div>
+                      <div className="text-base font-semibold text-blue-800 dark:text-blue-200 mb-2">
+                        {language === "en" ? "Remaining Generations" : "剩余生成次数"}
+                      </div>
+                      {!codeUsage.isUnlimited && (
+                        <div className="w-full bg-blue-200 dark:bg-blue-950 rounded-full h-3 mt-3 border border-blue-300 dark:border-blue-700">
+                          <div
+                            className="bg-gradient-to-r from-blue-600 to-purple-600 dark:from-blue-500 dark:to-purple-500 h-3 rounded-full transition-all shadow-sm"
+                            style={{ width: `${Math.min((codeUsage.current / codeUsage.limit) * 100, 100)}%` }}
+                          />
+                        </div>
+                      )}
+                      <div className="text-sm text-blue-900 dark:text-blue-100 font-medium mt-3">
+                        {codeUsage.isUnlimited
+                          ? (language === "en" ? "Unlimited code generation" : "无限次代码生成")
+                          : language === "en"
+                            ? `${codeUsage.current} / ${codeUsage.limit} used this month`
+                            : `本月已使用 ${codeUsage.current} / ${codeUsage.limit} 次`}
+                        </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-3xl font-bold text-blue-700 dark:text-blue-300">-</div>
+                      <div className="text-sm text-blue-800 dark:text-blue-200">
+                        {language === "en" ? "Unable to load usage data" : "无法加载使用数据"}
+                      </div>
+                    </>
+                  )}
                 </div>
-                <div className="text-center p-4 bg-secondary/20 rounded-lg">
-                  <div className="text-2xl font-bold text-accent">156</div>
-                  <div className="text-sm text-muted-foreground">
-                    {language === "en" ? "Lines of Code" : "代码行数"}
-                  </div>
-                </div>
-                <div className="text-center p-4 bg-secondary/20 rounded-lg">
-                  <div className="text-2xl font-bold text-accent">8</div>
-                  <div className="text-sm text-muted-foreground">
-                    {language === "en" ? "Projects Created" : "已创建项目"}
-                  </div>
+
+                {/* Subscription Status */}
+                <div className="text-center p-6 bg-gradient-to-br from-emerald-100 to-green-200 dark:from-emerald-950/40 dark:to-green-900/40 rounded-lg border-2 border-emerald-300 dark:border-emerald-700 shadow-sm">
+                  {isLoadingSubscription ? (
+                    <div className="flex items-center justify-center">
+                      <Loader2 className="h-6 w-6 animate-spin text-emerald-600 dark:text-emerald-400" />
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-center gap-2 mb-3">
+                        {getSubscriptionIcon(subscriptionTier)}
+                        <div className="text-4xl font-bold text-emerald-900 dark:text-emerald-100">
+                          {getSubscriptionDisplayName(subscriptionTier)}
+                        </div>
+                      </div>
+                      <div className="text-base font-semibold text-emerald-800 dark:text-emerald-200 mb-2">
+                        {language === "en" ? "Current Plan" : "当前计划"}
+                      </div>
+                      {subscriptionStatus === 'active' && subscriptionEndDate && (
+                        <>
+                          <div className="text-sm text-emerald-900 dark:text-emerald-100 font-medium mt-3">
+                            {language === "en" ? "Expires on" : "到期于"}: {formatDate(subscriptionEndDate)}
+                          </div>
+                          {remainingTime && (
+                            <div className="text-sm font-bold text-emerald-700 dark:text-emerald-300 mt-2">
+                              {language === "en" ? "Remaining" : "剩余"}: {remainingTime}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
+
+              {/* Monthly quota details */}
+              {!isLoadingUsage && codeUsage && !codeUsage.isUnlimited && (
+                <div className="mt-6 p-4 bg-secondary/20 rounded-lg">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      {language === "en" ? "Monthly Quota" : "本月配额"}
+                    </span>
+                    <span className="font-medium">
+                      {language === "en" ? "Resets on 1st of each month" : "每月1号重置"}
+                    </span>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

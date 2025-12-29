@@ -12,14 +12,14 @@ export const SUBSCRIPTION_TIERS = {
     name: 'Free',
     nameZh: '免费版',
     limits: {},
-    maxRequests: 100,
+    maxRequests: 30,
     models: ['deepseek-chat']
   },
   pro: {
     name: 'Pro',
     nameZh: '专业版',
     limits: {},
-    maxRequests: 1000,
+    maxRequests: 500,
     models: ['deepseek-chat', 'deepseek-coder', 'glm-4.6']
   },
   enterprise: {

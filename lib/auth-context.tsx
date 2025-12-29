@@ -116,13 +116,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (authUser && isAuth) {
           console.log('[Auth Context] 从localStorage恢复用户认证状态');
-          // 转换用户数据格式
+          // 转换用户数据格式，包含订阅信息
           const cloudBaseUser = {
             uid: authUser.id,
             email: authUser.email,
             username: authUser.name || authUser.email,
             name: authUser.name,
-            avatar: authUser.avatar
+            avatar: authUser.avatar,
+            subscription_plan: authUser.subscription_plan || authUser.subscriptionTier,
+            subscriptionTier: authUser.subscription_plan || authUser.subscriptionTier
           };
 
           // 获取真正的token
@@ -173,13 +175,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (authUser && isAuth && authState) {
         console.log('[Auth Context] 认证状态更新：用户已登录');
-        // 转换用户数据格式
+        // 转换用户数据格式，包含订阅信息
         const cloudBaseUser = {
           uid: authUser.id,
           email: authUser.email,
           username: authUser.name || authUser.email,
           name: authUser.name,
-          avatar: authUser.avatar
+          avatar: authUser.avatar,
+          subscription_plan: authUser.subscription_plan || authUser.subscriptionTier,
+          subscriptionTier: authUser.subscription_plan || authUser.subscriptionTier
         };
 
         setUser(cloudBaseUser);

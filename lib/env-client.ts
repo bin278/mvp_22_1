@@ -35,8 +35,8 @@ async function fetchEnvFromAPI(): Promise<PublicEnv> {
       headers: {
         'Content-Type': 'application/json',
       },
-      // 使用浏览器缓存，避免每次都请求
-      cache: 'force-cache',
+      // 不使用缓存，确保获取最新的环境变量
+      cache: 'no-store',
     })
 
     if (!response.ok) {
@@ -128,6 +128,25 @@ export function getPublicEnvSync(): PublicEnv {
 export function clearEnvCache(): void {
   envCache = null
   envPromise = null
+  console.log('🗑️ 环境变量缓存已清除')
+}
+
+/**
+ * 在开发环境中，每次页面加载时自动清除缓存
+ * 确保环境变量更改能够生效
+ */
+if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+  // 开发模式下不长期缓存，每次重新获取
+  const originalGetEnv = getPublicEnv
+  let callCount = 0
+  getPublicEnv = async function() {
+    callCount++
+    if (callCount > 1) {
+      console.log('🔄 开发模式：重新获取环境变量')
+      clearEnvCache()
+    }
+    return originalGetEnv()
+  } as any
 }
 
 

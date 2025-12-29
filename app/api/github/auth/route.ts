@@ -27,8 +27,7 @@ export async function GET(request: NextRequest) {
       console.error('GitHub OAuth not configured')
       return NextResponse.json(
         {
-          error: 'GitHub OAuth not configured',
-          setupUrl: `${appUrl}/github-setup`
+          error: 'GitHub OAuth not configured. Please contact administrator to configure GitHub OAuth settings.'
         },
         { status: 500 }
       )

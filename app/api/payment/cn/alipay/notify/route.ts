@@ -70,24 +70,21 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // 更新用户订阅状态 - 使用 CloudBase
-    const { days, planType, billingCycle } = payment.metadata || {};
-    const subscriptionEndDate = new Date();
-    subscriptionEndDate.setDate(subscriptionEndDate.getDate() + (days || 30));
+    // 检查支付类型：订阅订阅或加油包
+    const paymentType = payment.metadata?.type;
 
-    // 创建或更新用户订阅
-    await cloudbaseAdapter.createSubscription({
-      user_id: payment.user_id,
-      subscription_end: subscriptionEndDate.toISOString(),
-      status: "active",
-      plan_type: planType || "pro",
-      currency: payment.currency || "CNY",
-    });
+    if (paymentType === "credit_package") {
+      // 处理加油包购买
+      await handleCreditPackagePurchase(payment, now);
+    } else {
+      // 处理订阅购买
+      await handleSubscriptionPurchase(payment, now);
+    }
 
     console.log("✅ [Alipay Notify] 支付处理成功:", {
       orderId: result.orderId,
       userId: payment.user_id,
-      planType,
+      paymentType,
     });
 
     // 返回支付宝要求的成功响应
@@ -96,4 +93,64 @@ export async function POST(request: NextRequest) {
     console.error("[Alipay Notify] 处理失败:", error);
     return new NextResponse("fail", { status: 200 });
   }
+}
+
+// 处理加油包购买
+async function handleCreditPackagePurchase(payment: any, now: string) {
+  const db = getCloudBaseDatabase();
+  const { packageType, packageId, packageName, credits, validityDays } = payment.metadata || {};
+
+  // 计算过期日期
+  const purchaseDate = new Date(now);
+  const expiryDate = new Date(purchaseDate);
+  expiryDate.setDate(expiryDate.getDate() + (validityDays || 30));
+
+  // 创建加油包记录
+  const creditPackageResult = await db.collection("user_credit_packages").add({
+    user_id: payment.user_id,
+    package_id: packageId,
+    package_type: packageType || "basic",
+    credits_total: credits || 100,
+    credits_remaining: credits || 100,
+    status: "active",
+    purchase_date: purchaseDate.toISOString(),
+    expiry_date: expiryDate.toISOString(),
+    created_at: now,
+    updated_at: now,
+    metadata: {
+      packageName,
+      paymentId: payment._id,
+    },
+  });
+
+  console.log("✅ [Alipay Notify] 加油包创建成功:", {
+    creditPackageId: creditPackageResult.id,
+    userId: payment.user_id,
+    packageType,
+    credits,
+    expiryDate: expiryDate.toISOString(),
+  });
+}
+
+// 处理订阅购买
+async function handleSubscriptionPurchase(payment: any, now: string) {
+  // 更新用户订阅状态 - 使用 CloudBase
+  const { days, planType, billingCycle } = payment.metadata || {};
+  const subscriptionEndDate = new Date();
+  subscriptionEndDate.setDate(subscriptionEndDate.getDate() + (days || 30));
+
+  // 创建或更新用户订阅
+  await cloudbaseAdapter.createSubscription({
+    user_id: payment.user_id,
+    subscription_end: subscriptionEndDate.toISOString(),
+    status: "active",
+    plan_type: planType || "pro",
+    currency: payment.currency || "CNY",
+  });
+
+  console.log("✅ [Alipay Notify] 订阅创建成功:", {
+    userId: payment.user_id,
+    planType,
+    subscriptionEnd: subscriptionEndDate.toISOString(),
+  });
 }

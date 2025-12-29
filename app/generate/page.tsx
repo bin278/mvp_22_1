@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Sparkles, Copy, Download, ArrowLeft, Check, Eye, Code2, Keyboard, X, RefreshCw, AlertCircle, Zap, Github } from "lucide-react"
+import { Sparkles, Copy, Download, ArrowLeft, Check, Eye, Code2, Keyboard, X, RefreshCw, AlertCircle, Zap, Github, Crown, Calendar, TrendingUp } from "lucide-react"
 import Link from "next/link"
 import { downloadAsProperZip } from "@/lib/download-helper"
 import { ProtectedRoute } from "@/components/protected-route"
@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input"
 import { useAuth } from "@/lib/auth-context"
 import type { GeneratedProject } from "@/lib/code-generator"
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ConversationSidebar } from "@/components/conversation-sidebar"
 import { ModelSelector } from "@/components/model-selector"
 import { SUBSCRIPTION_TIERS, getDefaultModel, AVAILABLE_MODELS, canUseModel, type SubscriptionTier } from "@/lib/subscription-tiers"
@@ -128,7 +129,7 @@ function GeneratePageContent() {
     }
   }, [])
 
-  // 获取用户订阅等级
+  // 获取用户订阅等级和使用统计
   const fetchUserSubscriptionTier = async () => {
     try {
       if (authSession?.accessToken) {
@@ -142,10 +143,13 @@ function GeneratePageContent() {
         if (response.ok) {
           const data = await response.json()
           console.log('📊 Subscription status response:', data);
-          if (data.success && data.subscription?.planType) {
-            const serverTier = data.subscription.planType;
+          if (data.success && data.subscription) {
+            const serverTier = data.subscription.planType || 'free';
             console.log(`👤 User tier updated: ${userSubscriptionTier} -> ${serverTier}`);
             setUserSubscriptionTier(serverTier)
+            setSubscriptionStatus(data.subscription.status || 'inactive')
+            setSubscriptionEndDate(data.subscription.currentPeriodEnd)
+
             // 如果当前选择的模型不适用于新等级，则切换到默认模型
             if (!canUseModel(serverTier, selectedModel)) {
               const newModel = getDefaultModel(serverTier);
@@ -157,6 +161,23 @@ function GeneratePageContent() {
           }
         } else {
           console.log('❌ Failed to fetch subscription status:', response.status);
+        }
+
+        // 获取使用统计
+        try {
+          const usageResponse = await fetch('/api/subscription/check-usage', {
+            headers: {
+              'Authorization': `Bearer ${authSession.accessToken}`,
+            },
+          })
+
+          if (usageResponse.ok) {
+            const usageData = await usageResponse.json()
+            console.log('📊 Usage data loaded:', usageData.usage)
+            setCodeUsage(usageData.usage)
+          }
+        } catch (usageError) {
+          console.error('Failed to load usage data:', usageError)
         }
       } else {
         console.log('⚠️ No auth token available for subscription check');
@@ -203,6 +224,14 @@ function GeneratePageContent() {
   // 模型选择和订阅状态
   const [selectedModel, setSelectedModel] = useState<string>(getDefaultModel('free'))
   const [userSubscriptionTier, setUserSubscriptionTier] = useState<SubscriptionTier>('free')
+  const [subscriptionStatus, setSubscriptionStatus] = useState<string>('inactive')
+  const [subscriptionEndDate, setSubscriptionEndDate] = useState<string | null>(null)
+  const [codeUsage, setCodeUsage] = useState<{
+    current: number
+    limit: number
+    remaining: number
+    isUnlimited: boolean
+  } | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [previewDevice, setPreviewDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop')
   const [previewScale, setPreviewScale] = useState(1)
@@ -331,9 +360,9 @@ function GeneratePageContent() {
             if (consecutive404Count >= maxConsecutive404) {
               clearInterval(pollInterval)
               setError('任务创建失败，请重试')
-              setIsGenerating(false)
-              setCurrentTaskId(null)
-              setAsyncTaskId(null)
+            setIsGenerating(false)
+            setCurrentTaskId(null)
+            setAsyncTaskId(null)
             }
           } else {
             // 其他错误，继续轮询
@@ -343,7 +372,7 @@ function GeneratePageContent() {
           if (pollCount >= maxPolls) {
             clearInterval(pollInterval)
             setError('生成超时，请重试')
-            setIsGenerating(false)
+      setIsGenerating(false)
             setCurrentTaskId(null)
             setAsyncTaskId(null)
           }
@@ -391,7 +420,12 @@ function GeneratePageContent() {
   // 处理异步任务完成
   const handleAsyncTaskCompleted = async (status: TaskStatus) => {
     if (status.result) {
-      console.log('📦 处理异步任务结果')
+      console.log('📦 处理异步任务结果', {
+        hasResult: !!status.result,
+        currentConversationId,
+        hasAuthSession: !!authSession,
+        hasAccessToken: !!authSession?.accessToken
+      })
 
       // 检查是否是修改任务
       const isModification = status.result.isModification || false
@@ -435,35 +469,49 @@ function GeneratePageContent() {
         // 保存修改结果到数据库
         if (currentConversationId) {
           console.log('💾 Saving code modification to conversation:', currentConversationId)
-          await saveMessageToConversation(currentConversationId, 'assistant', modifyMessageContent)
-          // 只保存修改的文件
-          const modifiedFiles = { [selectedFile]: status.result.files[selectedFile] || status.result.files['src/App.tsx'] || '' }
-          await saveFilesToConversation(currentConversationId, modifiedFiles)
+          try {
+            await saveMessageToConversation(currentConversationId, 'assistant', modifyMessageContent)
+            // 只保存修改的文件
+            const modifiedFiles = { [selectedFile]: status.result.files[selectedFile] || status.result.files['src/App.tsx'] || '' }
+            await saveFilesToConversation(currentConversationId, modifiedFiles)
+          } catch (saveError) {
+            console.error('❌ Failed to save code modification:', saveError)
+            // 不阻止UI更新，只记录错误
+          }
+        } else {
+          console.warn('⚠️ No currentConversationId for code modification save')
         }
       } else {
         // 生成任务：设置新项目
         console.log('🚀 处理代码生成结果')
-        setGeneratedProject(status.result)
-        setSelectedFile('src/App.tsx')
-        setIsGenerating(false)
+      setGeneratedProject(status.result)
+      setSelectedFile('src/App.tsx')
+      setIsGenerating(false)
         setGenerationMode('async')
-        setCurrentTaskId(null)
-        setAsyncTaskId(null)
+      setCurrentTaskId(null)
+      setAsyncTaskId(null)
 
         // 显示生成成功消息
         const generateMessageContent = `✅ 代码生成完成！使用了智能异步模式以确保稳定性。`
-        setMessages(prev => [...prev, {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
           content: generateMessageContent,
-          timestamp: new Date()
-        }])
+        timestamp: new Date()
+      }])
 
         // 保存生成结果到数据库
         if (currentConversationId) {
           console.log('💾 Saving code generation to conversation:', currentConversationId)
-          await saveMessageToConversation(currentConversationId, 'assistant', generateMessageContent)
-          await saveFilesToConversation(currentConversationId, status.result.files)
+          try {
+            await saveMessageToConversation(currentConversationId, 'assistant', generateMessageContent)
+            await saveFilesToConversation(currentConversationId, status.result.files)
+          } catch (saveError) {
+            console.error('❌ Failed to save code generation:', saveError)
+            // 不阻止UI更新，只记录错误
+          }
+        } else {
+          console.warn('⚠️ No currentConversationId for code generation save')
         }
       }
 
@@ -889,6 +937,23 @@ function GeneratePageContent() {
   const handleGenerate = async () => {
     if (!prompt.trim()) return
 
+    // 检查使用次数限制
+    if (codeUsage && !codeUsage.isUnlimited && codeUsage.remaining <= 0) {
+      // 显示提示信息
+      const message = language === 'en'
+        ? `You have reached your monthly limit of ${codeUsage.limit} code generations.\n\nPlease upgrade your plan to continue generating code.`
+        : `您已达到本月的 ${codeUsage.limit} 次代码生成限制。\n\n请升级您的订阅计划以继续生成代码。`
+
+      alert(message)
+
+      // 可选：自动跳转到订阅页面
+      // if (confirm(language === 'en' ? 'Go to subscription page?' : '前往订阅页面？')) {
+      //   window.location.href = '/subscription'
+      // }
+
+      return
+    }
+
     // Validate prompt length
     const trimmedPrompt = prompt.trim()
     if (trimmedPrompt.length > 1000) {
@@ -905,6 +970,13 @@ function GeneratePageContent() {
 
     // 确保有对话ID，如果没有则创建新对话
     let conversationIdToUse = currentConversationId
+    console.log('🔍 Checking conversation creation:', {
+      currentConversationId,
+      hasAuthSession: !!authSession,
+      hasAccessToken: !!authSession?.accessToken,
+      accessTokenPreview: authSession?.accessToken ? authSession.accessToken.substring(0, 20) + '...' : 'none'
+    })
+
     if (!conversationIdToUse && authSession?.accessToken) {
       try {
         console.log('📝 Creating new conversation...')
@@ -988,7 +1060,7 @@ function GeneratePageContent() {
       console.error('异步生成启动失败:', error)
       setError('异步生成启动失败，请重试')
       setIsGenerating(false)
-    } finally {
+                      } finally {
       setAbortController(null)
     }
   }
@@ -1154,6 +1226,17 @@ function GeneratePageContent() {
 
   const handleModifyCode = async () => {
     if (!modifyInstruction.trim() || !generatedProject) return
+
+    // 检查使用次数限制
+    if (codeUsage && !codeUsage.isUnlimited && codeUsage.remaining <= 0) {
+      // 显示提示信息
+      const message = language === 'en'
+        ? `You have reached your monthly limit of ${codeUsage.limit} code generations.\n\nPlease upgrade your plan to continue modifying code.`
+        : `您已达到本月的 ${codeUsage.limit} 次代码生成限制。\n\n请升级您的订阅计划以继续修改代码。`
+
+      alert(message)
+      return
+    }
 
     const currentCode = generatedProject.files[selectedFile] || ''
     if (!currentCode) {
@@ -1493,7 +1576,7 @@ function GeneratePageContent() {
   }
 
   return (
-    <SidebarProvider defaultOpen={true}>
+    <SidebarProvider defaultOpen={false}>
 
       <div className="min-h-screen bg-background flex w-full">
         <ConversationSidebar
@@ -1504,14 +1587,81 @@ function GeneratePageContent() {
         <SidebarInset className="flex-1 flex flex-col">
           <header className="border-b border-border/40">
             <div className="w-full px-4 flex h-16 items-center justify-between">
-              <div className="flex items-center gap-2">
-                <SidebarTrigger />
+              <div className="flex items-center gap-4">
                 <Link href="/" className="inline-block">
                   <Button variant="ghost" size="sm">
                     <ArrowLeft className="mr-2 h-4 w-4" />
                     {t.back}
                   </Button>
                 </Link>
+
+                {/* 订阅信息显示 */}
+                {authSession && (
+                  <div className="flex items-center gap-3 text-sm">
+                    {/* 订阅等级 */}
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 border border-amber-200 dark:border-amber-800">
+                      <Crown className={`h-4 w-4 ${userSubscriptionTier === 'enterprise' ? 'text-amber-600 dark:text-amber-400' : userSubscriptionTier === 'pro' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`} />
+                      <span className={`font-semibold ${userSubscriptionTier === 'enterprise' ? 'text-amber-700 dark:text-amber-300' : userSubscriptionTier === 'pro' ? 'text-blue-700 dark:text-blue-300' : 'text-gray-600 dark:text-gray-400'}`}>
+                        {userSubscriptionTier === 'enterprise' ? (language === 'en' ? 'Enterprise' : '企业版') : userSubscriptionTier === 'pro' ? (language === 'en' ? 'Pro' : '专业版') : (language === 'en' ? 'Free' : '免费版')}
+                      </span>
+                    </div>
+
+                    {/* 剩余天数 */}
+                    {subscriptionStatus === 'active' && subscriptionEndDate && (
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 border border-green-200 dark:border-green-800">
+                        <Calendar className="h-4 w-4 text-green-600 dark:text-green-400" />
+                        <span className="font-semibold text-green-700 dark:text-green-300">
+                          {Math.max(0, Math.ceil((new Date(subscriptionEndDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))} {language === 'en' ? 'days' : '天'}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* 剩余生成次数 */}
+                    {codeUsage && (
+                      <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border ${
+                        codeUsage.isUnlimited
+                          ? 'bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800'
+                          : codeUsage.remaining <= 0
+                          ? 'bg-gradient-to-r from-red-50 to-red-100 dark:from-red-950/30 dark:to-red-900/30 border-red-300 dark:border-red-700 animate-pulse'
+                          : codeUsage.remaining <= 5
+                          ? 'bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/30 border-orange-300 dark:border-orange-700'
+                          : 'bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800'
+                      }`}>
+                        <TrendingUp className={`h-4 w-4 ${
+                          codeUsage.isUnlimited
+                            ? 'text-blue-600 dark:text-blue-400'
+                            : codeUsage.remaining <= 0
+                            ? 'text-red-600 dark:text-red-400'
+                            : codeUsage.remaining <= 5
+                            ? 'text-orange-600 dark:text-orange-400'
+                            : 'text-blue-600 dark:text-blue-400'
+                        }`} />
+                        <span className={`font-semibold ${
+                          codeUsage.isUnlimited
+                            ? 'text-blue-700 dark:text-blue-300'
+                            : codeUsage.remaining <= 0
+                            ? 'text-red-700 dark:text-red-300'
+                            : codeUsage.remaining <= 5
+                            ? 'text-orange-700 dark:text-orange-300'
+                            : 'text-blue-700 dark:text-blue-300'
+                        }`}>
+                          {codeUsage.isUnlimited ? (language === 'en' ? '∞' : '无限') : codeUsage.remaining} / {codeUsage.isUnlimited ? (language === 'en' ? '∞' : '无限') : codeUsage.limit}
+                        </span>
+                        <span className={`text-xs ${
+                          codeUsage.isUnlimited
+                            ? 'text-blue-600 dark:text-blue-400'
+                            : codeUsage.remaining <= 0
+                            ? 'text-red-600 dark:text-red-400'
+                            : codeUsage.remaining <= 5
+                            ? 'text-orange-600 dark:text-orange-400'
+                            : 'text-blue-600 dark:text-blue-400'
+                        }`}>
+                          {language === 'en' ? 'left' : '剩余'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => setShowTips(!showTips)} className="relative">
@@ -1553,6 +1703,19 @@ function GeneratePageContent() {
           <div className="grid gap-6 lg:grid-cols-3">
             {/* Left Column - Unified Control Panel */}
             <div className="lg:col-span-1 space-y-4">
+              {/* Sidebar Trigger - moved above control panel */}
+              <div className="flex justify-start mb-2">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <SidebarTrigger className="size-10 text-muted-foreground hover:text-foreground hover:bg-accent/50" />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>{language === "en" ? "Toggle Conversation History" : "切换对话历史"}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
               {/* Unified Control Panel */}
               <div className="rounded-xl border border-border bg-card p-4 shadow-lg h-[76vh] flex flex-col">
                 {/* Header */}
@@ -1626,14 +1789,14 @@ function GeneratePageContent() {
                                     <div className="text-xs text-muted-foreground">
                                       {language === 'en' ? 'AI is generating your code...' : 'AI正在生成您的代码...'}
                                     </div>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={cancelAsyncGeneration}
-                                      className="text-xs h-6 px-2"
-                                    >
-                                      {language === 'en' ? 'Cancel' : '取消'}
-                                    </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={cancelAsyncGeneration}
+                                        className="text-xs h-6 px-2"
+                                      >
+                                        {language === 'en' ? 'Cancel' : '取消'}
+                                      </Button>
                                   </div>
 
                                   <div className="flex items-center justify-center py-8">
@@ -1729,43 +1892,69 @@ function GeneratePageContent() {
                         {generatedProject ? `${modifyInstruction.length}/500` : `${prompt.length}/1000`}
                       </div>
                       {generatedProject ? (
-                        <Button
-                          onClick={handleModifyCode}
-                          disabled={isModifying || !modifyInstruction.trim()}
-                          size="sm"
-                          className="bg-accent hover:bg-accent/90"
-                        >
-                          {isModifying ? (
-                            <>
-                              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-2"></div>
-                              {language === "en" ? "Modifying..." : "修改中..."}
-                            </>
-                          ) : (
-                            <>
-                              <Code2 className="mr-2 h-3 w-3" />
-                              {language === "en" ? "Modify" : "修改"}
-                            </>
+                        <>
+                          <Button
+                            onClick={handleModifyCode}
+                            disabled={isModifying || !modifyInstruction.trim() || (codeUsage && !codeUsage.isUnlimited && codeUsage.remaining <= 0)}
+                            size="sm"
+                            className={(codeUsage && !codeUsage.isUnlimited && codeUsage.remaining <= 0)
+                              ? "bg-gray-400 cursor-not-allowed"
+                              : "bg-accent hover:bg-accent/90"}
+                          >
+                            {isModifying ? (
+                              <>
+                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-2"></div>
+                                {language === "en" ? "Modifying..." : "修改中..."}
+                              </>
+                            ) : (
+                              <>
+                                <Code2 className="mr-2 h-3 w-3" />
+                                {language === "en" ? "Modify" : "修改"}
+                              </>
+                            )}
+                          </Button>
+
+                          {/* 使用次数限制提示 */}
+                          {codeUsage && !codeUsage.isUnlimited && codeUsage.remaining <= 0 && (
+                            <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 bg-red-500 text-white text-xs px-3 py-1.5 rounded-lg shadow-lg whitespace-nowrap animate-bounce">
+                              {language === 'en'
+                                ? `${codeUsage.limit}/${codeUsage.limit} used - Upgrade to continue`
+                                : `已使用 ${codeUsage.limit}/${codeUsage.limit} 次 - 升级后继续`}
+                            </div>
                           )}
-                        </Button>
+                        </>
                       ) : (
-                        <Button
-                          onClick={handleGenerate}
-                          disabled={!prompt.trim() || isGenerating}
-                          size="sm"
-                          className="bg-accent hover:bg-accent/90"
-                        >
-                          {isGenerating ? (
-                            <>
-                              <div className="mr-2 h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                              {t.generating}
-                            </>
-                          ) : (
-                            <>
-                              <Sparkles className="mr-2 h-3 w-3" />
-                              {t.generate}
-                            </>
+                        <>
+                          <Button
+                            onClick={handleGenerate}
+                            disabled={!prompt.trim() || isGenerating || (codeUsage && !codeUsage.isUnlimited && codeUsage.remaining <= 0)}
+                            size="sm"
+                            className={(codeUsage && !codeUsage.isUnlimited && codeUsage.remaining <= 0)
+                              ? "bg-gray-400 cursor-not-allowed"
+                              : "bg-accent hover:bg-accent/90"}
+                          >
+                            {isGenerating ? (
+                              <>
+                                <div className="mr-2 h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                                {t.generating}
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="mr-2 h-3 w-3" />
+                                {t.generate}
+                              </>
+                            )}
+                          </Button>
+
+                          {/* 使用次数限制提示 */}
+                          {codeUsage && !codeUsage.isUnlimited && codeUsage.remaining <= 0 && (
+                            <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 bg-red-500 text-white text-xs px-3 py-1.5 rounded-lg shadow-lg whitespace-nowrap animate-bounce">
+                              {language === 'en'
+                                ? `${codeUsage.limit}/${codeUsage.limit} used - Upgrade to continue`
+                                : `已使用 ${codeUsage.limit}/${codeUsage.limit} 次 - 升级后继续`}
+                            </div>
                           )}
-                        </Button>
+                        </>
                       )}
                     </div>
                   </div>
@@ -1988,16 +2177,6 @@ function GeneratePageContent() {
                           {t.pushToGithub}
                         </Button>
                       ) : (
-                        <>
-                          <Button
-                            size="sm"
-                            onClick={() => window.open('/github-setup', '_blank')}
-                            variant="outline"
-                            className="gap-2 mr-2"
-                            title={language === 'en' ? 'GitHub setup guide' : 'GitHub 设置指南'}
-                          >
-                            ⚙️ Setup
-                          </Button>
                           <Button
                             size="sm"
                             onClick={handleConnectGithub}
@@ -2008,7 +2187,6 @@ function GeneratePageContent() {
                             <Github className="h-4 w-4" />
                             {t.connectGithub}
                           </Button>
-                        </>
                       )}
                     </div>
                   </div>

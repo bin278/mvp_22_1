@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { getCloudBaseDatabase, CloudBaseCollections, nowISO } from '../database/cloudbase-client';
+import { getUserPlan } from '../subscription/usage-tracker';
 
 export interface VerifiedUser {
   id: string;
@@ -44,12 +45,15 @@ export async function verifySessionToken(token: string): Promise<VerifiedUser | 
 
     const user = userResult.data[0];
 
+    // 获取真实的订阅计划（从 user_subscriptions 表）
+    const subscriptionPlan = await getUserPlan(user._id);
+
     return {
       id: user._id,
       email: user.email || undefined,
       name: user.name || undefined,
       avatar: user.avatar || undefined,
-      subscription_plan: user.subscriptionTier === 'pro' ? 'pro' : 'free'
+      subscription_plan: subscriptionPlan
     };
 
   } catch (error) {
@@ -121,12 +125,15 @@ export async function verifyToken(token: string): Promise<VerifiedUser | null> {
       return null;
     }
 
+    // 获取真实的订阅计划（从 user_subscriptions 表）
+    const subscriptionPlan = await getUserPlan(user._id);
+
     return {
       id: user._id,
       email: user.email || undefined,
       name: user.name || undefined,
       avatar: user.avatar || undefined,
-      subscription_plan: user.subscriptionTier === 'pro' ? 'pro' : 'free'
+      subscription_plan: subscriptionPlan
     };
 
   } catch (error) {

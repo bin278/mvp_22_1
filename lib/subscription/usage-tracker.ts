@@ -134,29 +134,32 @@ async function getUserPlanCloudBase(userId: string): Promise<PlanType> {
       .get();
 
     if (!result.data || result.data.length === 0) {
-      // 如果没有订阅记录，检查 users 集合中的 pro 字段
+      // 如果没有订阅记录，检查 users 集合中的订阅计划
       const userResult = await db.collection("users").doc(userId).get();
       const userData = userResult.data?.[0] || userResult.data;
-      
-      if (userData?.pro === true) {
-        return "pro";
-      }
+
       if (userData?.subscription_plan) {
         const plan = (userData.subscription_plan as string).toLowerCase();
         if (plan.includes("enterprise")) return "enterprise";
         if (plan.includes("pro")) return "pro";
       }
 
-      // CloudBase 用户认证成功后自动获得 pro 权限
-      // 这是为了向后兼容，让所有现有用户都能使用 AI 功能
-      console.log(`[CloudBase Plan] User ${userId} has no active subscription, granting pro access for compatibility`);
-      return "pro";
+      // 没有活跃订阅，返回免费计划
+      console.log(`[CloudBase Plan] User ${userId} has no active subscription, returning free plan`);
+      return "free";
     }
 
     const subscription = result.data[0];
-    
+
     // 检查是否过期
     if (subscription.subscription_end < now) {
+      console.log(`[CloudBase Plan] User ${userId} subscription expired at ${subscription.subscription_end}`);
+
+      // 异步更新数据库中的订阅状态为 expired
+      updateExpiredSubscription(subscription._id, userId).catch((err) => {
+        console.error(`[CloudBase Plan] Failed to update expired subscription status:`, err);
+      });
+
       return "free";
     }
 
@@ -166,8 +169,42 @@ async function getUserPlanCloudBase(userId: string): Promise<PlanType> {
     return "free";
   } catch (error) {
     console.error("[getUserPlanCloudBase] Error:", error);
-    // 出错时给予 pro 权限，确保 AI 功能可用
-    return "pro";
+    // 出错时返回免费计划，避免意外授予高级权限
+    return "free";
+  }
+}
+
+/**
+ * 更新过期的订阅状态
+ * @param subscriptionId 订阅记录ID
+ * @param userId 用户ID（用于日志）
+ */
+async function updateExpiredSubscription(
+  subscriptionId: string,
+  userId: string
+): Promise<void> {
+  if (!isChinaDeployment()) {
+    // Supabase 环境暂不支持
+    return;
+  }
+
+  const db = getCloudBaseDb();
+
+  try {
+    console.log(`[Subscription Cleanup] Updating expired subscription ${subscriptionId} for user ${userId}`);
+
+    await db
+      .collection("user_subscriptions")
+      .doc(subscriptionId)
+      .update({
+        status: "expired",
+        updated_at: new Date().toISOString(),
+      });
+
+    console.log(`[Subscription Cleanup] Successfully marked subscription ${subscriptionId} as expired`);
+  } catch (error: any) {
+    console.error(`[Subscription Cleanup] Failed to update subscription ${subscriptionId}:`, error);
+    throw error;
   }
 }
 
@@ -182,10 +219,13 @@ function getPeriodBounds(periodType: "daily" | "monthly"): { start: Date; end: D
   const now = new Date();
 
   if (periodType === "daily") {
+    // 获取中国时区（UTC+8）的今天开始和结束时间
+    // 使用本地时间构造，然后转换为 ISO 字符串时数据库会正确理解
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
     const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
     return { start, end };
   } else {
+    // 月度周期：从本月1号00:00:00到本月最后一天23:59:59
     const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
     const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     return { start, end };
@@ -247,10 +287,20 @@ async function getUserUsageStatsCloudBase(userId: string): Promise<UsageStats> {
   const features = PLAN_FEATURES[planType];
 
   const periodType = features.recommendationPeriod;
-  const periodLimit = features.recommendationLimit;
+  let periodLimit = features.recommendationLimit;
   const isUnlimited = periodLimit === -1;
 
   const { start, end } = getPeriodBounds(periodType);
+
+  console.log('📊 [getUserUsageStatsCloudBase] 查询使用统计:', {
+    userId,
+    planType,
+    periodType,
+    periodLimit,
+    isUnlimited,
+    start: start.toISOString(),
+    end: end.toISOString()
+  });
 
   // 查询当前周期的使用次数
   let currentPeriodUsage = 0;
@@ -265,6 +315,7 @@ async function getUserUsageStatsCloudBase(userId: string): Promise<UsageStats> {
       .count();
 
     currentPeriodUsage = result.total || 0;
+    console.log('✅ [getUserUsageStatsCloudBase] 查询结果:', { total: currentPeriodUsage });
   } catch (error: any) {
     console.error("[getUserUsageStatsCloudBase] Error counting usage:", error);
 
@@ -296,19 +347,62 @@ async function getUserUsageStatsCloudBase(userId: string): Promise<UsageStats> {
           .get();
 
         if (queryResult.data && queryResult.data.length > 0) {
-          await db.collection("recommendation_usage").doc(queryResult.data[0]._id).remove();
-          console.log("[getUserUsageStatsCloudBase] Cleaned up init record");
+          const deleteId = queryResult.data[0]._id || (queryResult.data as any).id;
+          await db.collection("recommendation_usage").doc(deleteId).remove();
+        }
+      } catch (createError: any) {
+        console.error("[getUserUsageStatsCloudBase] Failed to create collection:", createError);
+      }
+    }
+  }
+
+  // ✅ 新增：查询有效的加油包，累加加油包次数到限额
+  try {
+    const now = new Date().toISOString();
+    const creditPackagesResult = await db
+      .collection("user_credit_packages")
+      .where({
+        user_id: userId,
+        status: "active",
+      })
+      .get();
+
+    if (creditPackagesResult.data && creditPackagesResult.data.length > 0) {
+      let totalCreditPackageRemaining = 0;
+
+      for (const pkg of creditPackagesResult.data) {
+        const credits = pkg.credits_remaining || 0;
+        const expiryDate = pkg.expiry_date;
+
+        // 检查是否过期
+        if (expiryDate < now) {
+          // 标记为过期
+          console.log(`[getUserUsageStatsCloudBase] 加油包 ${pkg._id} 已过期，更新状态`);
+          await db.collection("user_credit_packages").doc(pkg._id).update({
+            status: "expired",
+            updated_at: now,
+          });
+          continue;
         }
 
-        currentPeriodUsage = 0; // 新集合当然是0
-      } catch (createError) {
-        console.error("[getUserUsageStatsCloudBase] Failed to create collection:", createError);
-        currentPeriodUsage = 0; // 创建失败也返回0，不影响用户使用
+        totalCreditPackageRemaining += credits;
+        console.log(`[getUserUsageStatsCloudBase] 有效加油包: ${pkg.package_type}, 剩余 ${credits} 次`);
       }
-    } else {
-      // 其他错误重新抛出
-      throw error;
+
+      // 将加油包剩余次数加到限额中
+      if (totalCreditPackageRemaining > 0 && !isUnlimited) {
+        const originalLimit = periodLimit;
+        periodLimit += totalCreditPackageRemaining;
+        console.log(`✅ [getUserUsageStatsCloudBase] 加油包次数已累加:`, {
+          原始限额: originalLimit,
+          加油包剩余: totalCreditPackageRemaining,
+          总限额: periodLimit,
+        });
+      }
     }
+  } catch (creditError) {
+    console.error("[getUserUsageStatsCloudBase] Error querying credit packages:", creditError);
+    // 继续处理，不影响主要功能
   }
 
   return {
@@ -406,16 +500,102 @@ async function recordRecommendationUsageCloudBase(
   const db = getCloudBaseDb();
 
   try {
-    await db.collection("recommendation_usage").add({
-      user_id: userId,
-      metadata: metadata || {},
-      created_at: new Date().toISOString(),
+    const now = new Date();
+    const nowISO = now.toISOString();
+    const nowLocal = now.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+
+    console.log('📝 [recordRecommendationUsageCloudBase] 准备记录使用:', {
+      userId,
+      metadata,
+      nowISO,
+      nowLocal,
+      timestamp: now.getTime()
     });
 
+    // ✅ 新增：优先扣除加油包的次数
+    try {
+      const creditPackagesResult = await db
+        .collection("user_credit_packages")
+        .where({
+          user_id: userId,
+          status: "active",
+        })
+        .get();
+
+      if (creditPackagesResult.data && creditPackagesResult.data.length > 0) {
+        // 找到最早购买的未过期加油包（先进先出）
+        const nowForCheck = new Date().toISOString();
+        let targetPackage: any = null;
+
+        for (const pkg of creditPackagesResult.data) {
+          // 检查是否过期
+          if (pkg.expiry_date < nowForCheck) {
+            // 标记为过期
+            await db.collection("user_credit_packages").doc(pkg._id).update({
+              status: "expired",
+              updated_at: nowISO,
+            });
+            continue;
+          }
+
+          // 找到第一个有剩余次数的加油包
+          if (pkg.credits_remaining > 0) {
+            targetPackage = pkg;
+            break;
+          }
+        }
+
+        // 如果找到有效的加油包，扣除次数
+        if (targetPackage) {
+          const newCreditsRemaining = Math.max(0, targetPackage.credits_remaining - 1);
+
+          await db.collection("user_credit_packages").doc(targetPackage._id).update({
+            credits_remaining: newCreditsRemaining,
+            updated_at: nowISO,
+          });
+
+          console.log('✅ [recordRecommendationUsageCloudBase] 已扣除加油包次数:', {
+            creditPackageId: targetPackage._id,
+            packageType: targetPackage.package_type,
+            原剩余: targetPackage.credits_remaining,
+            新剩余: newCreditsRemaining,
+          });
+
+          // 如果加油包用完了，标记为已用完
+          if (newCreditsRemaining === 0) {
+            await db.collection("user_credit_packages").doc(targetPackage._id).update({
+              status: "used_up",
+              updated_at: nowISO,
+            });
+            console.log('✅ [recordRecommendationUsageCloudBase] 加油包已用完:', targetPackage._id);
+          }
+
+          // 加油包记录成功，不记录到 recommendation_usage
+          return { success: true };
+        }
+      }
+    } catch (creditError) {
+      console.error("[recordRecommendationUsageCloudBase] Error deducting credit package:", creditError);
+      // 继续处理，记录到 recommendation_usage
+    }
+
+    // 没有加油包或加油包已用完，记录到 recommendation_usage
+    const result = await db.collection("recommendation_usage").add({
+      user_id: userId,
+      metadata: metadata || {},
+      created_at: nowISO,
+    });
+
+    console.log('✅ [recordRecommendationUsageCloudBase] 成功记录使用:', result.id);
     return { success: true };
-  } catch (error) {
-    console.error("Error recording recommendation usage:", error);
-    return { success: false, error: "Failed to record usage" };
+  } catch (error: any) {
+    console.error("❌ [recordRecommendationUsageCloudBase] Error recording recommendation usage:", error);
+    console.error("❌ [recordRecommendationUsageCloudBase] Error details:", {
+      code: error?.code,
+      message: error?.message,
+      stack: error?.stack
+    });
+    return { success: false, error: `Failed to record usage: ${error?.message || 'Unknown error'}` };
   }
 }
 

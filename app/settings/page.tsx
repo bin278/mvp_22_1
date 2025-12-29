@@ -53,7 +53,9 @@ export default function SettingsPage() {
     return "free"
   }
 
-  const currentPlan = overridePlan ?? (user?.subscriptionTier ? normalizePlan(user.subscriptionTier) : "free")
+  // 优先使用 subscription_plan（来自 token 验证，已通过 getUserPlan 获取真实值）
+  // 其次使用 subscriptionTier（来自数据库 users 表）
+  const currentPlan = overridePlan ?? (user?.subscription_plan ? normalizePlan(user.subscription_plan) : (user?.subscriptionTier ? normalizePlan(user.subscriptionTier) : "free"))
   const isEnterprise = currentPlan === "enterprise"
   const isPro = currentPlan === "pro"
   const subscriptionTitle = isEnterprise
@@ -68,7 +70,8 @@ export default function SettingsPage() {
     const fetchSubscriptionInfo = async () => {
       if (!isAuthenticated || !user) return
 
-      const plan = user?.subscriptionTier ? normalizePlan(user.subscriptionTier) : "free"
+      // 优先使用 subscription_plan
+      const plan = user?.subscription_plan ? normalizePlan(user.subscription_plan) : (user?.subscriptionTier ? normalizePlan(user.subscriptionTier) : "free")
       if (plan === "free") return
 
       try {

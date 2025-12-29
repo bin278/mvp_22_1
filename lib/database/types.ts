@@ -34,6 +34,44 @@ export interface UserSubscription {
 }
 
 /**
+ * 加油包类型
+ */
+export type CreditPackageType = "basic" | "standard" | "premium";
+
+/**
+ * 加油包配置
+ */
+export interface CreditPackageConfig {
+  id: string;
+  name: string;
+  nameZh: string;
+  description: string;
+  descriptionZh: string;
+  credits: number;
+  price: number;
+  currency: string;
+  validityDays: number;
+}
+
+/**
+ * 用户加油包记录
+ */
+export interface UserCreditPackage {
+  id: string;
+  user_id: string;
+  package_id: string;
+  package_type: CreditPackageType;
+  credits_total: number;
+  credits_remaining: number;
+  status: 'active' | 'expired' | 'used_up';
+  purchase_date: string;
+  expiry_date: string;
+  created_at: string;
+  updated_at: string;
+  metadata?: any;
+}
+
+/**
  * 支付记录
  */
 export interface Payment {

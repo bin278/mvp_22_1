@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
 import { getDatabase } from '@/lib/database/cloudbase';
+import { getUserPlan } from '@/lib/subscription/usage-tracker';
 
 export async function POST(request: NextRequest) {
   try {
@@ -52,6 +53,9 @@ export async function POST(request: NextRequest) {
 
     console.log('用户登录成功');
 
+    // 获取真实的订阅计划（从 user_subscriptions 表）
+    const subscriptionPlan = await getUserPlan(user._id);
+
     // 创建JWT token（与微信登录保持一致的格式）
     const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret';
     const tokenPayload = {
@@ -72,7 +76,7 @@ export async function POST(request: NextRequest) {
       email: user.email,
       name: user.name,
       avatar: user.avatar,
-      subscription_plan: user.subscriptionTier === 'pro' ? 'pro' : 'free'
+      subscription_plan: subscriptionPlan
     };
 
     return NextResponse.json({
